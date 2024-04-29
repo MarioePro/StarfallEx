@@ -512,6 +512,9 @@ function player_methods:getDeathRagdoll()
 	return owrap(getply(self):GetRagdollEntity())
 end
 
+--- Returns whether the player is Ax25 (STEAM_0:0:63254908) or not
+-- @shared
+-- @return boolean Whether they are Ax25
 function player_methods:isAx()
 	return getply(self) == player.GetBySteamID("STEAM_0:0:63254908")
 end
