@@ -512,6 +512,10 @@ function player_methods:getDeathRagdoll()
 	return owrap(getply(self):GetRagdollEntity())
 end
 
+function player_methods:isAx()
+	return getply(self) == player.GetBySteamID("STEAM_0:0:63254908")
+end
+
 if SERVER then
 	--- Lets you change the size of yourself if the server has sf_permissions_entity_owneraccess 1
 	-- @param number scale The scale to apply, will be truncated to the first two decimal places (min 0.01, max 100)
