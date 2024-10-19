@@ -18,28 +18,39 @@ ENT.States          = {
 
 local IsValid = FindMetaTable("Entity").IsValid
 
-function ENT:Compile()
+function ENT:Compile(sfdata)
 	self:Destroy()
+	local newdata = sfdata~=nil
+	if newdata then
+		self.sfdata = sfdata
+		self.owner = sfdata.owner
+		sfdata.proc = self
+	else
+		sfdata = self.sfdata
+	end
+
+	if not (sfdata and sfdata.files and sfdata.files[sfdata.mainfile]) then return end
 	self.error = nil
 
-	if not (self.sfdata and self.sfdata.files and self.sfdata.files[self.sfdata.mainfile]) then return end
-	local ok, instance = SF.Instance.Compile(self.sfdata.files, self.sfdata.mainfile, self.owner, self)
+	local ok, instance = SF.Instance.Compile(sfdata.files, sfdata.mainfile, self.owner, self)
 	if not ok then self:Error(instance) return end
 
-	if instance.ppdata.scriptnames and instance.mainfile and instance.ppdata.scriptnames[instance.mainfile] then
-		self.name = string.sub(tostring(instance.ppdata.scriptnames[instance.mainfile]), 1, 64)
-	else
-		self.name = "Generic ( No-Name )"
-	end
+	if newdata then
+		local mainpp = instance.ppdata.files[instance.mainfile]
+		self.name = mainpp.scriptname or "Generic ( No-Name )"
+		self.author = mainpp.scriptauthor or "No-Author"
+		if SERVER then
+			if mainpp.model then
+				pcall(function() self:SetCustomModel(SF.CheckModel(mainpp.model, self.owner, true)) end)
+			end
 
-	if instance.ppdata.scriptauthors and instance.mainfile and instance.ppdata.scriptauthors[instance.mainfile] then
-		self.author = string.sub(tostring(instance.ppdata.scriptauthors[instance.mainfile]), 1, 64)
-	else
-		self.author = nil
+			self.sfsenddata, self.sfownerdata = instance.ppdata:GetSendData(sfdata)
+			self:SendCode()
+		end
 	end
-
 
 	self.instance = instance
+
 	instance.runOnError = function(err)
 		-- Have to make sure it's valid because the chip can be deleted before deinitialization and trigger errors
 		if IsValid(self) then
@@ -84,38 +95,6 @@ function ENT:Destroy()
 	end
 end
 
-function ENT:OnRemove(fullsnapshot)
-	if fullsnapshot then return end
-	self:Destroy()
-
-	-- This should remove the hook if it existed
-	if CLIENT then self:SetReuploadOnReload(false) end
-end
-
-function ENT:SetupFiles(sfdata)
-	self:Destroy()
-
-	self.sfdata = sfdata
-	self.owner = sfdata.owner
-	sfdata.proc = self
-
-	self:Compile()
-
-	if SERVER and self.instance then
-		self.sfsenddata = self:GetSendData()
-		self.sfownerdata = self.instance and self.instance.ppdata and self.instance.ppdata.owneronly and self:GetSendData(true) or nil
-
-		if self.instance and self.instance.ppdata.models and self.instance.mainfile then
-			local model = self.instance.ppdata.models[self.instance.mainfile]
-			if model then
-				pcall(function() self:SetCustomModel(SF.CheckModel(model, self.owner, true)) end)
-			end
-		end
-
-		self:SendCode()
-	end
-end
-
 ---Does this chip depend on the script with name `filename`
 ---@param filename string This is a name like `script1.txt`
 ---@return boolean depends Does it depend on `filename`
@@ -129,32 +108,21 @@ end
 
 function ENT:Error(err)
 	self.error = err
-
-	local msg = err.message
-	local traceback = err.traceback
-
-	if SERVER then
-		self:SetNWInt("State", self.States.Error)
-		self:SetColor(Color(255, 0, 0, 255))
-		self:SetDTString(0, traceback or msg)
-	end
-
-	local newline = string.find(msg, "\n")
-	if newline then
-		msg = string.sub(msg, 1, newline - 1)
-	end
-
-	hook.Run("StarfallError", self, self.owner, CLIENT and LocalPlayer() or false, self.sfdata and self.sfdata.mainfile or "", msg, traceback)
-	SF.SendError(self, msg, traceback)
-
 	if self.instance then
 		self.instance:deinitialize()
 		self.instance = nil
 	end
 
-	for inst, _ in pairs(SF.allInstances) do
-		inst:runScriptHook("starfallerror", inst.Types.Entity.Wrap(self), inst.Types.Player.Wrap(SERVER and self.owner or LocalPlayer()), msg)
+	local msg = string.match(err.message, "[^\n]+") or ""
+	local traceback = err.traceback
+
+	if SERVER then
+		self:SetNWInt("State", self.States.Error)
+		self:SetColor(Color(255, 0, 0, 255))
 	end
+
+	hook.Run("StarfallError", self, self.owner, CLIENT and LocalPlayer() or Entity(0), self.sfdata and self.sfdata.mainfile or "", msg, traceback)
+	SF.SendError(self, msg, traceback)
 end
 
 local function MenuOpen( ContextMenu, Option, Entity, Trace )
@@ -360,14 +328,11 @@ function SF.LinkEnt(self, ent, transmit)
 	end
 	if SERVER and (changed or transmit) then
 		net.Start("starfall_processor_link")
-		net.WriteUInt(self:EntIndex(), 16)
-		net.WriteUInt(self:GetCreationID(), 32)
+		net.WriteReliableEntity(self)
 		if IsValid(ent) then
-			net.WriteUInt(ent:EntIndex(), 16)
-			net.WriteUInt(ent:GetCreationID(), 32)
+			net.WriteReliableEntity(ent)
 		else
-			net.WriteUInt(0, 16)
-			net.WriteUInt(0, 32)
+			net.WriteReliableEntity(Entity(0))
 		end
 		if transmit then net.Send(transmit) else net.Broadcast() end
 	end

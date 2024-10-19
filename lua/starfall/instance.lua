@@ -6,6 +6,7 @@
 
 local dsethook, dgethook = debug.sethook, debug.gethook
 local dgetmeta = debug.getmetatable
+local SysTime = SysTime
 
 if SERVER then
 	SF.cpuQuota = CreateConVar("sf_timebuffer", 0.005, FCVAR_ARCHIVE, "The max average the CPU time can reach.")
@@ -29,7 +30,7 @@ SF.Instance.__index = SF.Instance
 --- A set of all instances that have been created. It has weak keys and values.
 -- Instances are put here after initialization.
 SF.allInstances = {}
-SF.playerInstances = {}
+SF.playerInstances = setmetatable({}, {__index = function() return {} end})
 
 --- Preprocesses and Compiles code and returns an Instance
 -- @param code Either a string of code, or a {path=source} table
@@ -58,17 +59,13 @@ function SF.Instance.Compile(code, mainfile, player, entity)
 	instance.requires = {}
 	instance.permissionOverrides = {}
 
-	instance.ppdata = {}
-	for filename, source in pairs(code) do
-		local ok, err = pcall(SF.Preprocessor.ParseDirectives, filename, source, instance.ppdata)
-		if not ok then
-			return false, { message = err, traceback = "" }
-		end
-	end
+	local ok, ppdata = pcall(SF.Preprocessor, code)
+	if not ok then return false, { message = ppdata, traceback = "" } end
+	instance.ppdata = ppdata
 
 	if player:IsWorld() then
 		player = SF.Superuser
-	elseif instance.ppdata.superuser and instance.ppdata.superuser[mainfile] then
+	elseif ppdata.files[mainfile].superuser then
 		if not SF.AllowSuperUser:GetBool() then return false, { message = "Can't use --@superuser unless sf_superuserallowed is enabled!", traceback = "" } end
 		local ok, message = hook.Run("StarfallCanSuperUser", player)
 		if ok == false or (ok == nil and not player:IsSuperAdmin()) then return false, { message = message or "Can't use --@superuser unless you are superadmin!", traceback = "" } end
@@ -119,30 +116,18 @@ function SF.Instance.Compile(code, mainfile, player, entity)
 		return false, { message = "", traceback = err }
 	end
 
-	local doNotRun = {}
-	local includesdata = instance.ppdata.includesdata
-	if includesdata then
-		for filename, t in pairs(includesdata) do
-			for _, datapath in ipairs(t) do
-				local codepath = SF.ChoosePath(datapath, string.GetPathFromFilename(filename), function(testpath)
-					return instance.source[testpath]
-				end)
-				if codepath then doNotRun[codepath] = true end
-			end
-		end
-	end
-
-	local serverorclientpp, owneronlypp = instance.ppdata.serverorclient or {}, instance.ppdata.owneronly or {}
-	for filename, source in pairs(code) do
-		if doNotRun[filename] then continue end -- Don't compile data files
-		if CLIENT and owneronlypp[filename] and LocalPlayer() ~= player then continue end -- Don't compile owner-only files if not owner
-		local serverorclient = serverorclientpp[filename]
+	for filename, fdata in pairs(ppdata.files) do
+		if fdata.datafile then continue end -- Don't compile data files
+		if CLIENT and fdata.owneronly and LocalPlayer() ~= player then continue end -- Don't compile owner-only files if not owner
+		local serverorclient = fdata.serverorclient
 		if (serverorclient == "server" and CLIENT) or (serverorclient == "client" and SERVER) then continue end -- Don't compile files for other realm
-		local func = SF.CompileString(source, "SF:"..filename, false)
+
+		local func = SF.CompileString(fdata.code, "SF:"..filename, false)
 		if isstring(func) then
 			return false, { message = func, traceback = "" }
 		end
 		debug.setfenv(func, instance.env)
+
 		instance.scripts[filename] = func
 	end
 
@@ -253,7 +238,7 @@ function SF.Instance:CreateWrapper(metatable, typedata)
 		end
 		function unwrap(value)
 			local ret = sf2sensitive[value]
-			return ret or self.CheckType(value, metatable, 2) or SF.Throw("Object no longer valid", 3)
+			return ret or self.CheckType(value, metatable, 2)~=value or SF.Throw("Object no longer valid", 3)
 		end
 	end
 
@@ -598,7 +583,7 @@ function SF.Instance:initialize()
 	self.cpu_softquota = 1
 
 	SF.allInstances[self] = true
-	if SF.playerInstances[self.player] then
+	if rawget(SF.playerInstances, self.player) then
 		SF.playerInstances[self.player][self] = true
 	else
 		SF.playerInstances[self.player] = {[self] = true}
@@ -698,16 +683,13 @@ end
 function SF.Instance:deinitialize()
 	self:RunHook("deinitialize")
 	SF.allInstances[self] = nil
-	local playerInstances = SF.playerInstances[self.player]
-	if playerInstances then
-		playerInstances[self] = nil
-		if not next(playerInstances) then
-			SF.playerInstances[self.player] = nil
-		end
+	SF.playerInstances[self.player][self] = nil
+	if next(SF.playerInstances[self.player])==nil then
+		SF.playerInstances[self.player] = nil
 	end
 
 	self.error = true
-	local noop = function() end
+	local noop = function() return {} end
 	self.runScriptHook = noop
 	self.runScriptHookForResult = noop
 	self.runFunction = noop

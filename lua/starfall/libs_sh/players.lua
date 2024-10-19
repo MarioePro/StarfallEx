@@ -113,7 +113,7 @@ if SERVER then
 end
 
 local function getply(self)
-	local ent = unwrap(self)
+	local ent = player_meta.sf2sensitive[self]
 	if IsValid(ent) then
 		return ent
 	else
@@ -326,13 +326,6 @@ function player_methods:isBot()
 	return getply(self):IsBot()
 end
 
---- Returns whether the player is connected
--- @shared
--- @return boolean True if player is connected
-function player_methods:isConnected()
-	return getply(self):IsConnected()
-end
-
 --- Returns whether the player is frozen
 -- @shared
 -- @return boolean True if player is frozen
@@ -353,6 +346,13 @@ end
 -- @return boolean True if player belongs to group
 function player_methods:isUserGroup(group)
 	return getply(self):IsUserGroup(group)
+end
+
+--- Returns the usergroup of the player
+-- @shared
+-- @return string Usergroup, "user" if player has no group
+function player_methods:getUserGroup()
+	return getply(self):GetUserGroup()
 end
 
 --- Returns the player's current ping
@@ -663,6 +663,13 @@ if SERVER then
 		return getply(self):IsTimingOut()
 	end
 
+	--- Returns whether the player is connected
+	-- @server
+	-- @return boolean True if player is connected
+	function player_methods:isConnected()
+		return getply(self):IsConnected()
+	end
+
 	--- Forces the player to say the first argument
 	-- Only works on the chip's owner.
 	-- @server
@@ -806,6 +813,17 @@ if SERVER then
 		checkpermission(instance, ent, "player.modifyMovementProperties")
 		checkvalidnumber(val)
 		ent:SetFriction(math.Clamp(val/cvars.Number("sv_friction"),0,10))
+	end
+	
+	--- Kills the target.
+	--- Requires 'entities.setHealth' permission.
+	-- @server
+	function player_methods:kill()
+		local ent = getply(self)
+		checkpermission(instance, ent, "entities.setHealth")
+		if ent:Alive() then
+			ent:Kill()
+		end
 	end
 end
 
@@ -1118,6 +1136,13 @@ if CLIENT then
 
 		if not anim then return 0 end
 		return (anim.progress * anim.range + anim.min) * anim.duration
+	end
+
+	--- Returns whether the player's player model will be drawn at the time the function is called.
+	-- @client
+	-- @return boolean True if the player's playermodel is visible
+	function player_methods:shouldDrawLocalPlayer()
+		return getply(self):ShouldDrawLocalPlayer()
 	end
 end
 

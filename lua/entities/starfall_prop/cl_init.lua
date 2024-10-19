@@ -12,6 +12,11 @@ function ENT:Initialize()
 	self.rendermeshloaded = false
 	self:DrawShadow(false)
 	self:EnableCustomCollisions( true )
+
+	local mesh
+	SF.CallOnRemove(self, "sf_prop",
+	function() mesh = self.rendermesh end,
+	function() if mesh then mesh:Destroy() end end)
 end
 
 function ENT:BuildPhysics(mesh)
@@ -53,21 +58,11 @@ function ENT:GetRenderMesh()
 	end
 end
 
-function ENT:OnRemove(fullsnapshot)
-	if fullsnapshot then return end
-	local mesh = self.rendermesh
-	if mesh then
-		mesh:Destroy()
-	end
-end
-
 net.Receive("starfall_custom_prop", function()
-	local index = net.ReadUInt(16)
-	local creationindex = net.ReadUInt(32)
 	local self, data
 
 	local function applyData()
-		if not (IsValid(self) and data and not self.rendermeshloaded) then return end
+		if not (IsValid(self) and self.rendermesh:IsValid() and data and not self.rendermeshloaded) then return end
 		local stream = SF.StringStream(data)
 		local physmesh = {}
 		local mins, maxs = Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
@@ -107,7 +102,7 @@ net.Receive("starfall_custom_prop", function()
 		self.rendermeshloaded = true
 	end
 
-	SF.WaitForEntity(index, creationindex, function(e)
+	net.ReadReliableEntity(function(e)
 		if e and e:GetClass()=="starfall_prop" then
 			self = e
 			applyData()

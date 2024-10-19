@@ -90,18 +90,28 @@ hook.Add("InitPostEntity","SF_SanitizeTypeMetatables",function()
 end)
 
 local removedHooks = setmetatable({}, {__index=function(t,k) local r={} t[k]=r return r end})
-hook.Add("EntityRemoved","SF_CallOnRemove",function(ent, fullsnapshot)
-	if fullsnapshot then return end
+hook.Add("EntityRemoved","SF_CallOnRemove",function(ent)
 	local hooks = removedHooks[ent]
 	if hooks then
 		for k, v in pairs(hooks) do
-			v(ent)
+			if v[1] then v[1](ent) end
 		end
-		removedHooks[ent] = nil
+		if CLIENT then
+			timer.Simple(0, function()
+				if not IsValid(ent) then
+					for k, v in pairs(hooks) do
+						if v[2] then v[2](ent) end
+					end
+					removedHooks[ent] = nil
+				end
+			end)
+		elseif SERVER then
+			removedHooks[ent] = nil
+		end
 	end
 end)
-function SF.CallOnRemove(ent, key, func)
-	removedHooks[ent][key] = func
+function SF.CallOnRemove(ent, key, func, deferedfunc)
+	removedHooks[ent][key] = {func, deferedfunc}
 end
 function SF.RemoveCallOnRemove(ent, key)
 	removedHooks[ent][key] = nil
@@ -113,17 +123,22 @@ end
 -------------------------------------------------------------------------------
 
 -- Returns a class that manages a table of entity keys
-function SF.EntityTable(key, destructor)
+function SF.EntityTable(key, destructor, dontwait)
 	return setmetatable({}, {
 		__newindex = function(t, e, v)
 			rawset(t, e, v)
 			if e ~= SF.Superuser then
-				SF.CallOnRemove(e, key, function()
+				local function ondestroy()
 					if t[e] then
 						if destructor then destructor(e, v) end
 						t[e] = nil
 					end
-				end)
+				end
+				if SERVER or dontwait then
+					SF.CallOnRemove(e, key, ondestroy)
+				else
+					SF.CallOnRemove(e, key, nil, ondestroy)
+				end
 			end
 		end
 	})
@@ -298,9 +313,12 @@ setmetatable(SF.LimitObject, SF.LimitObject)
 --- Returns a class that handles entities spawned by an instance
 SF.EntManager = {
 	__index = {
-		register = function(self, instance, ent)
+		register = function(self, instance, ent, onremove)
 			if not self.nocallonremove then
-				local function sf_on_remove() self:onremove(instance, ent) end
+				local function sf_on_remove()
+					self:onremove(instance, ent)
+					if onremove then onremove() end
+				end
 				ent.sf_on_remove = sf_on_remove
 				SF.CallOnRemove(ent, "entmanager", sf_on_remove)
 			end
@@ -309,7 +327,8 @@ SF.EntManager = {
 			self:free(instance.player, -1)
 		end,
 		remove = function(self, instance, ent)
-			if not IsValid(ent) then return end
+			-- ent:IsValid() used since not all types this class supports are entity
+			if not (ent and ent:IsValid()) then return end
 			if self.nocallonremove then
 				self:onremove(instance, ent)
 			else
@@ -421,6 +440,61 @@ SF.StringRestrictor = {
 	end
 }
 setmetatable(SF.StringRestrictor, SF.StringRestrictor)
+
+SF.NetValidator = {
+	Players = {},
+	__index = {
+		receive = function(self)
+			if net.ReadDouble() == self.validation then
+				self.successes = self.successes + 1
+				if self.successes == 5 then
+					self.success()
+					self:remove()
+				end
+			end
+		end,
+		tick = function(self)
+			if IsValid(self.player) then
+				self.validation = math.random()
+				net.Start("starfall_net_validate")
+				net.WriteDouble(self.validation)
+				net.Send(self.player)
+			else
+				self:remove()
+			end
+		end,
+		remove = function(self)
+			SF.NetValidator.Players[self.player] = nil
+			timer.Remove(self.timername)
+		end
+	},
+	__call = function(p, ply, success)
+		local t = setmetatable({
+			player = ply,
+			timername = "sf_net_validate"..ply:EntIndex(),
+			successes = 0,
+			success = success,
+		}, p)
+		SF.NetValidator.Players[ply] = t
+		timer.Create(t.timername, 2, 0, function() t:tick() end)
+	end
+}
+setmetatable(SF.NetValidator, SF.NetValidator)
+
+if SERVER then
+	util.AddNetworkString("starfall_net_validate")
+	net.Receive("starfall_net_validate", function(len, ply)
+		if SF.NetValidator.Players[ply] then
+			SF.NetValidator.Players[ply]:receive()
+		end
+	end)
+else
+	net.Receive("starfall_net_validate", function()
+		net.Start("starfall_net_validate")
+		net.WriteDouble(net.ReadDouble())
+		net.SendToServer()
+	end)
+end
 
 local function steamIdToConsoleSafeName(steamid)
 	local ply = player.GetBySteamID(steamid)
@@ -649,6 +723,55 @@ if CLIENT then
 	end)
 end
 
+SF.RenderStack = {
+	__index = {
+		create = function(self, data)
+			return setmetatable({
+				run = self.runDirty,
+				data = data,
+			}, self.objindex)
+		end,
+
+		runDirty = function(self, flags)
+			local pushes = {self.maincode[1]}
+			local pops = {self.maincode[3]}
+			for _, v in ipairs(self.properties) do
+				pushes[#pushes+1], pops[#pops+1] = v(self.data)
+			end
+
+			local code = {}
+			for i=1, #pushes do
+				code[#code + 1] = pushes[i]
+			end
+			code[#code + 1] = self.maincode[2]
+			for i=#pops, 1, -1 do
+				code[#code + 1] = pops[i]
+			end
+
+			self.renderfunc = CompileString(table.concat(code, " "), "RenderStack")()
+			self.run = self.runClean
+			self:run(flags)
+		end,
+
+		runClean = function(self, flags)
+			self.renderfunc(self.data, flags)
+		end,
+
+		makeDirty = function(self)
+			self.run = self.runDirty
+		end,
+	},
+	__call = function(p, maincode, properties)
+		local ret = setmetatable({
+			maincode = maincode,
+			properties = properties
+		}, p)
+		ret.objindex = {__index = ret}
+		return ret
+	end
+}
+setmetatable(SF.RenderStack, SF.RenderStack)
+
 
 -- Error type containing error info
 SF.Errormeta = {
@@ -691,6 +814,21 @@ function SF.MakeError(msg, level, uncatchable, prependinfo, userdata)
 	}, SF.Errormeta)
 end
 
+function SF.GetLines(str)
+	local current_pos = 1
+	local lineN = 0
+	return function()
+		local start_pos, end_pos = string.find( str, "\r?\n", current_pos )
+		if start_pos then
+			local ret = string.sub( str, current_pos, start_pos - 1 )
+			current_pos = end_pos + 1
+			lineN = lineN + 1
+			return lineN, ret
+		else
+			return nil
+		end
+	end
+end
 
 -------------------------------------------------------------------------------
 -- Starfall instance hook management
@@ -770,6 +908,9 @@ do
 					self.hookstoremove[index] = true
 					self.pairs = self.dirtyPairs
 				end
+			end,
+			exists = function(self, index)
+				return self.hooks[index]~=nil or self.hookstoadd[index]~=nil
 			end,
 			isEmpty = function(self)
 				return self.n==0
@@ -1101,7 +1242,7 @@ function SF.EntIsReady(ent)
 	if class=="player" then
 		return ent:IsPlayer()
 	elseif class=="starfall_processor" then
-		return ent.SetupFiles~=nil
+		return ent.Compile~=nil
 	elseif class=="starfall_hologram" then
 		return ent.SetClip~=nil
 	elseif class=="starfall_prop" then
@@ -1142,145 +1283,222 @@ function SF.WaitForEntity(index, creationIndex, callback)
 	SF.WaitForConditions(function()
 		local ent=Entity(index)
 		if SF.EntIsReady(ent) and ent:GetCreationID()==creationIndex then
-			callback(ent)
+			ProtectedCall(callback, ent)
 			return true
 		end
 	end, callback, 10)
 end
 
+
 local playerinithooks = {}
 hook.Add("PlayerInitialSpawn","SF_PlayerInitialize",function(ply)
-	local n = "SF_WaitForPlayerInit"..ply:EntIndex()
-	hook.Add("SetupMove", n, function(ply2, mv, cmd)
-		if IsValid(ply) then
-			if ply == ply2 and not cmd:IsForced() then
-				for _, v in ipairs(playerinithooks) do v(ply) end
-				hook.Remove("SetupMove", n)
-			end
-		else
-			hook.Remove("SetupMove", n)
-		end
+	SF.NetValidator(ply, function()
+		for _, v in ipairs(playerinithooks) do v(ply) end
 	end)
 end)
 function SF.WaitForPlayerInit(func)
 	playerinithooks[#playerinithooks+1] = func
 end
 
-
 -- Table networking
 do
-	local typetostringfuncs = {
-		[TYPE_NUMBER] = function(ss, x) ss:writeInt8(TYPE_NUMBER) ss:writeDouble(x) end,
-		[TYPE_STRING] = function(ss, x) ss:writeInt8(TYPE_STRING) ss:writeInt32(#x) ss:write(x) end,
-		[TYPE_BOOL] = function(ss, x) ss:writeInt8(TYPE_BOOL) ss:writeInt8(x and 1 or 0) end,
-		[TYPE_ENTITY] = function(ss, x) ss:writeInt8(TYPE_ENTITY) ss:writeInt16(x:EntIndex()) end,
-		[TYPE_VECTOR] = function(ss, x) ss:writeInt8(TYPE_VECTOR) for i=1, 3 do ss:writeFloat(x[i]) end end,
-		[TYPE_ANGLE] = function(ss, x) ss:writeInt8(TYPE_ANGLE) for i=1, 3 do ss:writeFloat(x[i]) end end,
-		[TYPE_COLOR] = function(ss, x) ss:writeInt8(TYPE_COLOR) ss:writeInt8(x.r) ss:writeInt8(x.g) ss:writeInt8(x.b) ss:writeInt8(x.a) end,
-		[TYPE_MATRIX] = function(ss, x) ss:writeInt8(TYPE_MATRIX) for k, v in ipairs{x:Unpack()} do ss:writeFloat(v) end end,
-	}
-	local stringtotypefuncs = {
-		[TYPE_NUMBER] = function(ss) return ss:readDouble() end,
-		[TYPE_STRING] = function(ss) return ss:read(ss:readUInt32()) end,
-		[TYPE_BOOL] = function(ss) return ss:readUInt8() == 1 end,
-		[TYPE_ENTITY] = function(ss) return Entity(ss:readUInt16()) end,
-		[TYPE_VECTOR] = function(ss) return Vector(ss:readFloat(), ss:readFloat(), ss:readFloat()) end,
-		[TYPE_ANGLE] = function(ss) return Angle(ss:readFloat(), ss:readFloat(), ss:readFloat()) end,
-		[TYPE_COLOR] = function(ss) return Color(ss:readUInt8(), ss:readUInt8(), ss:readUInt8(), ss:readUInt8()) end,
-		[TYPE_MATRIX] = function(ss)
-			local t = {} for i=1, 16 do t[i] = ss:readFloat() end
-			local m = Matrix() m:SetUnpacked(unpack(t))
-			return m
-		end,
-	}
+	local TYPE_TABLEREF = 50
+	local TYPE_TABLESEQ = 51
+	local TYPE_TABLEHASH = 52
+	local TYPE_NUMBER8 = 53
+	local TYPE_NUMBER8NEG = 54
+	local TYPE_NUMBER16 = 55
+	local TYPE_NUMBER16NEG = 56
+	local TYPE_NUMBER32 = 57
+	local TYPE_NUMBER32NEG = 58
+	
+	local pairs_, instance_, tableLoopupCtr, tableLookup, ss
+
+	local typetostringfuncs = {}
+	local function typeToString(val)
+		typetostringfuncs[TypeID(val)](val)
+	end
+
+	local function errorType(x) error("Invalid type " .. SF.GetType(x)) end
+	for i=0, 255 do typetostringfuncs[i] = errorType end
+	typetostringfuncs[TYPE_NUMBER] = function(x)
+		if math.floor(x)==x then
+			local typeoffset
+			if x<0 then typeoffset = 1 x = -x else typeoffset = 0 end
+			if x<0x100 then ss:writeInt8(TYPE_NUMBER8 + typeoffset) ss:writeInt8(x)
+			elseif x<0x10000 then ss:writeInt8(TYPE_NUMBER16 + typeoffset) ss:writeInt16(x)
+			elseif x<0x100000000 then ss:writeInt8(TYPE_NUMBER32 + typeoffset) ss:writeInt32(x)
+			else ss:writeInt8(TYPE_NUMBER) ss:writeDouble(x)
+			end
+		else
+			ss:writeInt8(TYPE_NUMBER) ss:writeDouble(x)
+		end
+	end
+	typetostringfuncs[TYPE_STRING] = function(x) ss:writeInt8(TYPE_STRING) ss:writeInt32(#x) ss:write(x) end
+	typetostringfuncs[TYPE_BOOL] = function(x) ss:writeInt8(TYPE_BOOL) ss:writeInt8(x and 1 or 0) end
+	typetostringfuncs[TYPE_ENTITY] = function(x) ss:writeInt8(TYPE_ENTITY) ss:writeInt16(x:EntIndex()) end
+	typetostringfuncs[TYPE_VECTOR] = function(x) ss:writeInt8(TYPE_VECTOR) for i=1, 3 do ss:writeFloat(x[i]) end end
+	typetostringfuncs[TYPE_ANGLE] = function(x) ss:writeInt8(TYPE_ANGLE) for i=1, 3 do ss:writeFloat(x[i]) end end
+	typetostringfuncs[TYPE_COLOR] = function(x) ss:writeInt8(TYPE_COLOR) ss:writeInt8(x.r) ss:writeInt8(x.g) ss:writeInt8(x.b) ss:writeInt8(x.a) end
+	typetostringfuncs[TYPE_MATRIX] = function(x) ss:writeInt8(TYPE_MATRIX) for k, v in ipairs{x:Unpack()} do ss:writeFloat(v) end end
+	typetostringfuncs[TYPE_TABLE] = function(val)
+		if instance_ then
+			local unwrapped = instance_.UnwrapObject(val)
+			if unwrapped then return typeToString(unwrapped) end
+		end
+
+		if IsColor(val) then return typetostringfuncs[TYPE_COLOR](val) end
+
+		local lookup = tableLookup[val]
+		if lookup then
+			ss:writeInt8(TYPE_TABLEREF)
+			ss:writeInt32(lookup)
+			return
+		end
+		tableLookup[val] = tableLoopupCtr
+		tableLoopupCtr = tableLoopupCtr + 1
+
+		local nseq = 1
+		local nhash = 0
+		for key, value in pairs(val) do
+			if key==nseq then nseq = nseq + 1
+			else nhash = nhash + 1
+			end
+		end
+
+		if nseq>1 then
+			if nhash>0 then
+				ss:writeInt8(TYPE_TABLE)
+				ss:writeInt32(nseq - 1)
+				for i=1, nseq-1 do
+					typeToString(val[i])
+				end
+				nseq = 1
+				ss:writeInt32(nhash)
+				for key, value in pairs_(val) do
+					if key==nseq then nseq = nseq + 1 else
+						typeToString(key)
+						typeToString(value)
+					end
+				end
+			else
+				ss:writeInt8(TYPE_TABLESEQ)
+				ss:writeInt32(nseq - 1)
+				for i=1, nseq-1 do
+					typeToString(val[i])
+				end
+			end
+		else
+			if nhash>0 then
+				ss:writeInt8(TYPE_TABLEHASH)
+				nseq = 1
+				ss:writeInt32(nhash)
+				for key, value in pairs_(val) do
+					if key==nseq then nseq = nseq + 1 else
+						typeToString(key)
+						typeToString(value)
+					end
+				end
+			else
+				ss:writeInt8(TYPE_TABLESEQ)
+				ss:writeInt32(0)
+			end
+		end
+	end
+
+	local stringtotypefuncs = {}
+	local stringToType
+
+	local function errorType() error("Invalid type while decoding!") end
+	for i=0, 255 do stringtotypefuncs[i] = errorType end
+	stringtotypefuncs[TYPE_NUMBER] = function() return ss:readDouble() end
+	stringtotypefuncs[TYPE_STRING] = function() return ss:read(ss:readUInt32()) end
+	stringtotypefuncs[TYPE_BOOL] = function() return ss:readUInt8() == 1 end
+	stringtotypefuncs[TYPE_ENTITY] = function() return Entity(ss:readUInt16()) end
+	stringtotypefuncs[TYPE_VECTOR] = function() return Vector(ss:readFloat(), ss:readFloat(), ss:readFloat()) end
+	stringtotypefuncs[TYPE_ANGLE] = function() return Angle(ss:readFloat(), ss:readFloat(), ss:readFloat()) end
+	stringtotypefuncs[TYPE_COLOR] = function() return Color(ss:readUInt8(), ss:readUInt8(), ss:readUInt8(), ss:readUInt8()) end
+	stringtotypefuncs[TYPE_MATRIX] = function()
+		local t = {} for i=1, 16 do t[i] = ss:readFloat() end
+		local m = Matrix() m:SetUnpacked(unpack(t))
+		return m
+	end
+	stringtotypefuncs[TYPE_TABLE] = function()
+		local t = {}
+		for i=1, ss:readUInt32() do
+			t[i] = stringToType()
+		end
+		for i=1, ss:readUInt32() do
+			local key, val = stringToType(), stringToType()
+			t[key] = val
+		end
+		tableLookup[#tableLookup + 1] = t
+		return t
+	end
+	stringtotypefuncs[TYPE_TABLEREF] = function()
+		return tableLookup[ss:readUInt32()]
+	end
+	stringtotypefuncs[TYPE_TABLESEQ] = function()
+		local t = {}
+		for i=1, ss:readUInt32() do
+			t[i] = stringToType()
+		end
+		tableLookup[#tableLookup + 1] = t
+		return t
+	end
+	stringtotypefuncs[TYPE_TABLEHASH] = function()
+		local t = {}
+		for i=1, ss:readUInt32() do
+			local key, val = stringToType(), stringToType()
+			t[key] = val
+		end
+		tableLookup[#tableLookup + 1] = t
+		return t
+	end
+	stringtotypefuncs[TYPE_NUMBER8] = function() return ss:readUInt8() end
+	stringtotypefuncs[TYPE_NUMBER8NEG] = function() return -ss:readUInt8() end
+	stringtotypefuncs[TYPE_NUMBER16] = function() return ss:readUInt16() end
+	stringtotypefuncs[TYPE_NUMBER16NEG] = function() return -ss:readUInt16() end
+	stringtotypefuncs[TYPE_NUMBER32] = function() return ss:readUInt32() end
+	stringtotypefuncs[TYPE_NUMBER32NEG] = function() return -ss:readUInt32() end
+	
 	--- Convert table to string data.
 	-- Only works with strings, numbers, tables, bools, 
 	function SF.TableToString(tbl, instance, sorted)
-		local pairs = sorted and SortedPairs or pairs
-		local ss = SF.StringStream()
-		local tableLoopupCtr = 1
-		local tableLookup = {}
-
-		local function typeToString(val)
-			local func = typetostringfuncs[TypeID(val)]
-			if func then func(ss, val) else error("Invalid type " .. SF.GetType(val)) end
-		end
-
-		typetostringfuncs[TYPE_TABLE] = function(ss, val)
-			if instance then
-				local unwrapped = instance.UnwrapObject(val)
-				if unwrapped then
-					typeToString(unwrapped)
-					return
-				end
-			end
-
-			if IsColor(val) then return typetostringfuncs[TYPE_COLOR](ss, val) end
-			
-			ss:writeInt8(TYPE_TABLE)
-			
-			local lookup = tableLookup[val]
-			if lookup then
-				ss:writeInt16(lookup)
-				return
-			end
-			
-			tableLookup[val] = tableLoopupCtr
-			tableLoopupCtr = tableLoopupCtr + 1
-			ss:writeInt16(tableLoopupCtr)
-			ss:writeInt16(table.Count(val))
-			
-			for key, value in pairs(val) do
-				typeToString(key)
-				typeToString(value)
-			end
-		end
+		pairs_ = sorted and SortedPairs or pairs
+		instance_ = instance
+		tableLoopupCtr = 1
+		tableLookup = {}
+		ss = SF.StringStream()
 
 		typeToString(tbl)
+
 		local ret = ss:getString()
-		ss, tableLookup = nil, nil
+		tableLookup = nil
+		ss = nil
 		return ret
 	end
 
 	--- Convert string data to table
 	function SF.StringToTable(str, instance)
-		local ss = SF.StringStream(str)
-		local tableLookup = {}
+		instance_ = instance
+		tableLookup = {}
+		ss = SF.StringStream(str)
 
-		local function stringToType()
-			local t = ss:readUInt8()
-			local func = stringtotypefuncs[t]
-			if func then return func(ss) else error("Invalid type " .. t) end
-		end
-
-		stringtotypefuncs[TYPE_TABLE] = function(ss)
-			local index = ss:readUInt16()
-			local lookup = tableLookup[index]
-			if lookup then
-				return lookup
+		if instance then
+			function stringToType()
+				local val = stringtotypefuncs[ss:readUInt8()]()
+				return instance.WrapObject(val) or val
 			end
-			
-			local t = {}
-			tableLookup[index] = t
-			
-			for i=1, ss:readUInt16() do
-				local key, val
-				if instance then
-					key = stringToType()
-					key = instance.WrapObject(key) or key
-					val = stringToType()
-					val = instance.WrapObject(val) or val
-				else
-					key = stringToType()
-					val = stringToType()
-				end
-				t[key] = val
+		else
+			function stringToType()
+				return stringtotypefuncs[ss:readUInt8()]()
 			end
-			return t
 		end
 
 		local ret = stringToType()
-		ss, tableLookup = nil, nil
+		tableLookup = nil
+		ss = nil
 		return ret
 	end
 end
@@ -1313,13 +1531,36 @@ function SF.CheckMaterial(material)
 	return mat
 end
 
-
 function SF.CheckModel(model, player, prop)
 	if #model > 260 then SF.Throw("Model path too long!", 3) end
 	model = SF.NormalizePath(string.lower(model))
 	if string.GetExtensionFromFilename(model) ~= "mdl" or (SERVER and (not util.IsValidModel(model) or (prop and not util.IsValidProp(model)))) then SF.Throw("Invalid model: "..model, 3) end
 	if player~=SF.Superuser and hook.Run("PlayerSpawnObject", player, model)==false then SF.Throw("Not allowed to use model: "..model, 3) end
 	return model
+end
+
+SF.UniqueSounds = setmetatable({}, {__index=function(t,k) local r={[1]=0} t[k]=r return r end})
+local maxUniqueSounds = CreateConVar("sf_sounds_unique_max"..(CLIENT and "_cl" or ""), "200", FCVAR_ARCHIVE, "The maximum number of unique sounds paths allowed")
+
+function SF.CheckSound(ply, path)
+	-- Limit length and remove invalid chars
+	if #path>260 then SF.Throw("Sound path too long!", 3) end
+	if string.match(path, "[\"?']") then SF.Throw("Sound path contains invalid characters!", 3) end
+
+	-- Extract sound flags. Only allowed flags are '<', '>', '^', ')'
+	local flags, checkpath = string.match(path, "^([^%w_/%.]*)(.*)")
+	if #flags>2 or string.match(flags, "[^<>%^%)]") then
+		SF.Throw("Invalid sound flags! "..flags, 3)
+	end
+
+	local UserUniqueSounds = SF.UniqueSounds[ply:SteamID()]
+	if not UserUniqueSounds[checkpath] then
+		if UserUniqueSounds[1] >= maxUniqueSounds:GetInt() then
+			SF.Throw("The unique sounds limit has been reached.", 3)
+		end
+		UserUniqueSounds[checkpath] = true
+		UserUniqueSounds[1] = UserUniqueSounds[1] + 1
+	end
 end
 
 function SF.CheckRagdoll(model)
@@ -1384,7 +1625,7 @@ function SF.GetExecutingPath()
 		local info = debug.getinfo(stackLevel, "S")
 		if not info then break end
 
-		curdir = string.match(info.short_src, "^SF:(.*[/\\])")
+		curdir = string.match(info.short_src, "^SF:(.*)")
 		stackLevel = stackLevel + 1
 	until curdir
 	return curdir
@@ -1867,6 +2108,7 @@ do
 	string_library.setChar = string.SetChar string_library.SetChar = string.SetChar
 	string_library.split = string.Split string_library.Split = string.Split
 	string_library.startWith = string.StartWith string_library.StartWith = string.StartWith
+	string_library.startsWith = string.StartsWith string_library.StartsWith = string.StartsWith
 	string_library.stripExtension = string.StripExtension string_library.StripExtension = string.StripExtension
 	string_library.sub = string.sub
 	string_library.toMinutesSeconds = string.ToMinutesSeconds string_library.ToMinutesSeconds = string.ToMinutesSeconds

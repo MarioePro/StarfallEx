@@ -555,7 +555,7 @@ function material_library.create(shader)
 	return wrap(m)
 end
 
-local image_params = {["nocull"] = true,["alphatest"] = true,["mips"] = true,["noclamp"] = true,["smooth"] = true}
+local image_params = {["nocull"] = true,["alphatest"] = true,["mips"] = true,["noclamp"] = true,["smooth"] = true,["ignorez"] = true,["vertexlitgeneric"] = true}
 --- Creates a .jpg or .png material from file
 --- Can't be modified
 -- @param string path The path to the image file, must be a jpg or png image
@@ -569,7 +569,7 @@ function material_library.createFromImage(path, params)
 	local ext = string.GetExtensionFromFilename(path)
 	if ext ~= "jpg" and ext ~= "png" then SF.Throw("Expected a .jpg or .png file", 2) end
 
-	if not (file.Exists("materials/" .. path, "GAME") or (string.sub(path,1,5)=="data/" and file.Exists(path,"GAME"))) then
+	if not (file.Exists("materials/" .. path, "GAME") or ((string.sub(path,1,5)=="data/" or string.sub(path,1,12)=="data_static/") and file.Exists(path, "GAME"))) then
 		SF.Throw("The material path is invalid", 2)
 	end
 
@@ -586,9 +586,7 @@ end
 
 --- Frees a user created material allowing you to create others
 function material_methods:destroy()
-
 	local m = unwrap(self)
-	if not m then SF.Throw("The material is already destroyed?", 2) end
 
 	local name = m:GetName()
 	local rt = instance.data.render.rendertargets[name]
@@ -596,11 +594,8 @@ function material_methods:destroy()
 		instance.env.render.destroyRenderTarget(name)
 	end
 
-	local sensitive2sf, sf2sensitive = material_meta.sensitive2sf, material_meta.sf2sensitive
-	sensitive2sf[m] = nil
-	sf2sensitive[self] = nil
-	dsetmeta(self, nil)
-
+	material_meta.sf2sensitive[self] = nil
+	material_meta.sensitive2sf[m] = nil
 	usermaterials[m] = nil
 	material_bank:free(instance.player, m, m:GetShader())
 end

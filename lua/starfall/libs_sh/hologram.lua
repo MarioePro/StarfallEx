@@ -78,7 +78,7 @@ instance:AddHook("deinitialize", function()
 end)
 
 local function getholo(self)
-	local ent = unwrap(self)
+	local ent = hologram_meta.sf2sensitive[self]
 	if IsValid(ent) then
 		return ent
 	else
@@ -132,6 +132,7 @@ function hologram_library.create(pos, ang, model, scale)
 			return wrap(holoent)
 		end
 	else
+		if instance.data.render.isRendering then SF.Throw("Can't create hologram while rendering!", 2) end
 		holoent = ents.CreateClientside("starfall_hologram")
 		if IsValid(holoent) then
 			holoent.SFHoloOwner = ply
@@ -252,6 +253,7 @@ else
 		else
 			holo.filter_mag = nil
 		end
+		holo.renderstack:makeDirty()
 	end
 
 	--- Sets the texture filtering function when viewing a far texture
@@ -268,6 +270,7 @@ else
 		else
 			holo.filter_min = nil
 		end
+		holo.renderstack:makeDirty()
 	end
 
 	--- Sets a hologram entity's rendermatrix
@@ -356,24 +359,24 @@ end
 -- @shared
 -- @param number index Whatever number you want the clip to be
 -- @param boolean enabled Whether the clip is enabled
--- @param Vector origin The center of the clip plane in world coordinates, or local to entity if it is specified
--- @param Vector normal The the direction of the clip plane in world coordinates, or local to entity if it is specified
--- @param Entity? entity (Optional) The entity to make coordinates local to, otherwise the world is used
+-- @param Vector? origin The center of the clip plane in world coordinates, or local to entity if it is specified. Only used if enabled.
+-- @param Vector? normal The the direction of the clip plane in world coordinates, or local to entity if it is specified. Only used if enabled.
+-- @param Entity? entity (Optional) The entity to make coordinates local to, otherwise the world is used. Only used if enabled.
 function hologram_methods:setClip(index, enabled, origin, normal, entity)
 	local holo = getholo(self)
 
 	checkluatype(index, TYPE_NUMBER)
 	checkluatype(enabled, TYPE_BOOL)
 
-	if entity ~= nil then
-		entity = getent(entity)
-	end
-
-	local origin, normal = vunwrap(origin), vunwrap(normal)
-
 	checkpermission(instance, holo, "hologram.setRenderProperty")
 
 	if enabled then
+		if entity ~= nil then
+			entity = getent(entity)
+		end
+
+		origin, normal = vunwrap(origin), vunwrap(normal)
+
 		local clips = holo.clips
 		if not clips[index] then
 			local max = maxclips:GetInt()
@@ -473,6 +476,7 @@ function hologram_methods:setAnimation(animation, frame, rate)
 	if animation~=nil then
 		holo:ResetSequence(animation)
 		holo.AutomaticFrameAdvance = animation~=-1
+		if CLIENT then holo.renderstack:makeDirty() end
 	end
 	if frame ~= nil then
 		checkluatype(frame, TYPE_NUMBER)
@@ -482,6 +486,18 @@ function hologram_methods:setAnimation(animation, frame, rate)
 		checkluatype(rate, TYPE_NUMBER)
 		holo:SetPlaybackRate(rate)
 	end
+end
+
+--- Set the cull mode for a hologram.
+-- @shared
+-- @param number mode Cull mode. 0 for counter clock wise, 1 for clock wise
+function hologram_methods:setCullMode(mode)
+	checkluatype(mode, TYPE_NUMBER)
+
+	local holo = getholo(self)
+	checkpermission(instance, holo, "entities.setRenderProperty")
+
+	holo:SetCullMode(mode==1)
 end
 
 --- Applies engine effects to the hologram

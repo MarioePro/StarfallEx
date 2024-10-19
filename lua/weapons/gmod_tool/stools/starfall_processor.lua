@@ -69,7 +69,7 @@ else
 		SF.Editor.open()
 
 		if net.ReadBool() then
-			net.ReadStarfall(nil, function(ok, sfdata)
+			net.ReadStarfall(nil, function(ok, sfdata, err)
 				if ok then
 					local mainfile = sfdata.files[sfdata.mainfile]
 					sfdata.files[sfdata.mainfile] = nil
@@ -79,7 +79,7 @@ else
 					-- Add mainfile last so it gets focus
 					SF.Editor.openWithCode(sfdata.mainfile, mainfile, nil, false)
 				else
-					SF.AddNotify(LocalPlayer(), "Error downloading SF code. ("..sfdata..")", "ERROR", 7, "ERROR1")
+					SF.AddNotify(LocalPlayer(), "Error downloading SF code. (" .. err .. ")", "ERROR", 7, "ERROR1")
 				end
 			end)
 		end
@@ -117,7 +117,7 @@ function TOOL:LeftClick(trace)
 
 	if not SF.RequestCode(ply, function(sfdata)
 		if not (sf and sf:IsValid()) then return end -- Probably removed during transfer
-		sf:SetupFiles(sfdata)
+		sf:Compile(sfdata)
 	end) then
 		SF.AddNotify(ply, "Cannot upload SF code, please wait for the current upload to finish.", "ERROR", 7, "ERROR1")
 		return false
@@ -126,7 +126,14 @@ function TOOL:LeftClick(trace)
 	if ent:IsValid() and ent:GetClass() == "starfall_processor" then
 		sf = ent
 	else
-		local model = self:GetClientInfo("Model")
+		local model = self:GetClientInfo("ScriptModel")
+		if model == "" then
+			model = self:GetClientInfo("Model")
+		end
+		if not pcall(SF.CheckModel, model, ply, true) then
+			SF.AddNotify(ply, "Invalid chip model specified: " .. model, "ERROR", 7, "ERROR1")
+			return false
+		end
 		if not self:GetSWEP():CheckLimit("starfall_processor") then return false end
 
 		local Ang = trace.HitNormal:Angle()
@@ -163,7 +170,7 @@ function TOOL:Reload(trace)
 
 		if not SF.RequestCode(ply, function(sfdata)
 			if not sf:IsValid() then return end -- Probably removed during transfer
-			sf:SetupFiles(sfdata)
+			sf:Compile(sfdata)
 		end, sf.sfdata.mainfile) then
 			SF.AddNotify(ply, "Cannot upload SF code, please wait for the current upload to finish.", "ERROR", 7, "ERROR1")
 		end
@@ -200,9 +207,10 @@ function TOOL:Think()
 	-- Ghost code
 	if (SERVER and game.SinglePlayer()) or (CLIENT and not game.SinglePlayer()) then
 		local model = self:GetClientInfo("ScriptModel")
-		if model=="" then
+		if model == "" then
 			model = self:GetClientInfo("Model")
 		end
+
 		local ghost = self.GhostEntity
 		if not (ghost and ghost:IsValid() and ghost:GetModel() == model) then
 			self:MakeGhostEntity(model, Vector(0, 0, 0), Angle(0, 0, 0))

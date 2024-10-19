@@ -76,7 +76,7 @@ local plywrap = instance.Types.Player.Wrap
 local swrap, sunwrap = instance.Types.SurfaceInfo.Wrap, instance.Types.SurfaceInfo.Unwrap
 
 local function getent(self)
-	local ent = eunwrap(self)
+	local ent = ent_meta.sf2sensitive[self]
 	if IsValid(ent) or IsWorld(ent) then
 		return ent
 	else
@@ -237,12 +237,34 @@ if CLIENT then
 		local ent = getent(self)
 		if not ent.IsSFHologram and not ent.IsSFProp then SF.Throw("The entity isn't a hologram or custom-prop", 2) end
 
-
 		checkpermission(instance, ent, "entities.setRenderProperty")
 
 		mins, maxs = vunwrap(mins), vunwrap(maxs)
 		ent:SetRenderBounds(mins, maxs)
 		ent.sf_userrenderbounds = {mins, maxs}
+	end
+
+	--- Returns render bounds of the entity as local vectors
+	-- If the render bounds are not inside players view, the entity will not be drawn!
+	-- @client
+	-- @return Vector The minimum vector of the bounds
+	-- @return Vector The maximum vector of the bounds
+	function ents_methods:getRenderBounds()
+		local ent = getent(self)
+		local mins, maxs = ent:GetRenderBounds()
+		return vwrap(mins), vwrap(maxs)
+	end
+
+	--- Sets the Level Of Detail model to use with this entity. This may not work for all models if the model doesn't include any LOD sub models.
+	-- This function works exactly like the clientside r_lod convar and takes priority over it.
+	-- -1 leaves the engine to automatically set the Level of Detail. The Level Of Detail may range from 0 to 8, with 0 being the highest quality and 8 the lowest.
+	-- @client
+	-- @param number lod The Level Of Detail model ID to use.
+	function ents_methods:setLOD(num)
+		local ent = getent(self)
+		checkluatype(num, TYPE_NUMBER)
+		checkpermission(instance, ent, "entities.setRenderProperty")
+		ent:SetLOD(num)
 	end
 
 	local canDrawEntity = SF.CanDrawEntity
@@ -273,7 +295,7 @@ local soundsByEntity = SF.EntityTable("emitSoundsByEntity", function(e, t)
 	for snd, _ in pairs(t) do
 		e:StopSound(snd)
 	end
-end)
+end, true)
 
 local sound_library = instance.Libraries.sound
 
@@ -297,8 +319,7 @@ end
 -- @param number channel Default CHAN_AUTO or CHAN_WEAPON for weapons
 function ents_methods:emitSound(snd, lvl, pitch, volume, channel)
 	checkluatype(snd, TYPE_STRING)
-	if #snd>260 then SF.Throw("Sound path too long!") end
-	if string.match(snd, "[\"?]") then SF.Throw("Sound path contains invalid characters!") end
+	SF.CheckSound(instance.player, snd)
 
 	local ent = getent(self)
 	checkpermission(instance, ent, "entities.emitSound")
@@ -822,7 +843,7 @@ end
 -- @shared
 -- @return boolean True if valid, false if not
 function ents_methods:isValid()
-	return IsValid(eunwrap(self))
+	return IsValid(ent_meta.sf2sensitive[self])
 end
 
 --- Checks if an entity is a player.
@@ -927,6 +948,21 @@ function ents_methods:getQuotaMax()
 	else
 		SF.Throw("The entity isn't a starfall or expression2 chip", 2)
 	end
+end
+
+--- Return if the entity has a starfall instance or E2 instance
+-- @shared
+-- @return boolean if has starfall instance or E2 instance
+function ents_methods:hasInstance()
+	local ent = getent(self)
+
+	if ent.Starfall then
+		return ent.instance~=nil
+	elseif ent:GetClass()=="gmod_wire_expression2" then
+		return SERVER and not ent.error
+	end
+
+	return false
 end
 
 if SERVER then

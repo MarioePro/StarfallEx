@@ -5,12 +5,25 @@ DEFINE_BASECLASS("base_gmodentity")
 ENT.RenderGroup = RENDERGROUP_BOTH
 
 local IsValid = FindMetaTable("Entity").IsValid
+local IsWorld = FindMetaTable("Entity").IsWorld
 
 function ENT:Initialize()
 	self.name = "Generic ( No-Name )"
 	self.OverlayFade = 0
 	self.ActiveHuds = {}
 	self.reuploadOnReload = false
+
+	local instance
+	SF.CallOnRemove(self, "sf_processor", function()
+		instance = self.instance
+		self:SetReuploadOnReload(false)
+	end,
+	function()
+		if instance then
+			instance:runScriptHook("removed")
+			instance:deinitialize()
+		end
+	end)
 end
 
 function ENT:GetOverlayText()
@@ -117,7 +130,7 @@ hook.Add("StarfallError", "StarfallErrorReport", function(_, owner, client, main
 	if not IsValid(owner) then return end
 	local local_player = LocalPlayer()
 	if owner == local_player then
-		if not client or client == owner then
+		if client:IsWorld() or client == owner then
 			SF.AddNotify(owner, message, "ERROR", 7, "ERROR1")
 		elseif client then
 			if should_notify then
@@ -137,42 +150,25 @@ hook.Add("StarfallError", "StarfallErrorReport", function(_, owner, client, main
 end)
 
 net.Receive("starfall_processor_download", function(len)
-	net.ReadStarfall(nil, function(ok, sfdata)
-		if ok then
-			local proc, owner
-			local function setup()
-				sfdata.proc = proc
-				sfdata.owner = owner
-				proc:SetupFiles(sfdata)
-			end
-
-			if sfdata.ownerindex == 0 then
-				owner = game.GetWorld()
-			else
-				SF.WaitForEntity(sfdata.ownerindex, sfdata.ownercreateindex, function(e)
-					owner = e if proc and owner then setup() end
-				end)
-			end
-			SF.WaitForEntity(sfdata.procindex, sfdata.proccreateindex, function(e)
-				proc = e if proc and proc:GetClass()=="starfall_processor" and owner then setup() end
-			end)
+	net.ReadStarfall(nil, function(ok, sfdata, err)
+		if ok and IsValid(sfdata.proc) and (IsValid(sfdata.owner) or IsWorld(sfdata.owner)) then
+			sfdata.proc:Compile(sfdata)
+		elseif IsValid(sfdata.proc) and IsValid(sfdata.owner) then
+			sfdata.proc.owner = sfdata.owner
+			sfdata.proc:Error({message = "Failed to download and initialize client: " .. tostring(err), traceback = "" })
 		end
 	end)
 end)
 
 net.Receive("starfall_processor_link", function()
-	local componenti, componentci = net.ReadUInt(16), net.ReadUInt(32)
-	local proci, procci = net.ReadUInt(16), net.ReadUInt(32)
 	local component, proc
-
-	SF.WaitForEntity(componenti, componentci, function(e)
-		component = e if component and (proc or proci==0) then SF.LinkEnt(component, proc) end
-	end)
-	if proci~=0 then
-		SF.WaitForEntity(proci, procci, function(e)
-			proc = e if component and proc then SF.LinkEnt(component, proc) end
-		end)
+	local function link()
+		if component and proc then
+			SF.LinkEnt(component, proc)
+		end
 	end
+	net.ReadReliableEntity(function(e) component=e link() end)
+	net.ReadReliableEntity(function(e) proc=e link() end)
 end)
 
 net.Receive("starfall_processor_kill", function()
@@ -232,11 +228,9 @@ end, "Terminates a user's starfall chips clientside.", true)
 ---Terminates a user's starfall chips. Admin only
 SF.SteamIDConcommand("sf_kill", function( executor, ply )
 	if not executor:IsAdmin() then return end
-	if SF.playerInstances[ply] then
-		for instance, _ in pairs( SF.playerInstances[ply] ) do
-			net.Start( "starfall_processor_kill" )
-			net.WriteEntity( instance.entity )
-			net.SendToServer()
-		end
+	for instance, _ in pairs( SF.playerInstances[ply] ) do
+		net.Start( "starfall_processor_kill" )
+		net.WriteEntity( instance.entity )
+		net.SendToServer()
 	end
 end, "Admin Only. Terminate a user's starfall chips.", true )

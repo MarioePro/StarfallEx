@@ -241,6 +241,8 @@ string_library.split = sfstring.Split
 -- @param string str String to be checked
 -- @param string start String to check with
 -- @return boolean True if the first string starts with the second
+string_library.startsWith = sfstring.StartsWith
+
 string_library.startWith = sfstring.StartWith
 
 --- Removes the extension of a path
@@ -256,6 +258,7 @@ string_library.stripExtension = sfstring.StripExtension
 -- @param string str The string you'll take a sub-string out of
 -- @param number startPos The position of the first character that will be included in the sub-string
 -- @param number? endPos The position of the last character to be included in the sub-string. It can be negative to count from the end
+-- @return string The sub-string
 string_library.sub = sfstring.sub
 
 --- Converts time to minutes and seconds string.
