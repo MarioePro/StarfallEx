@@ -30,18 +30,26 @@ SF.RegisterLibrary("prop")
 return function(instance)
 local checkpermission = instance.player ~= SF.Superuser and SF.Permissions.check or function() end
 
-local propConfig = {clean = true, undo = false, propList = entList}
-instance.data.props = propConfig
-
-instance:AddHook("deinitialize", function()
-	entList:deinitialize(instance, propConfig.clean)
-end)
 
 local props_library = instance.Libraries.prop
 local owrap, ounwrap = instance.WrapObject, instance.UnwrapObject
 local ent_meta, ewrap, eunwrap = instance.Types.Entity, instance.Types.Entity.Wrap, instance.Types.Entity.Unwrap
 local ang_meta, awrap, aunwrap = instance.Types.Angle, instance.Types.Angle.Wrap, instance.Types.Angle.Unwrap
 local vec_meta, vwrap, vunwrap = instance.Types.Vector, instance.Types.Vector.Wrap, instance.Types.Vector.Unwrap
+
+local propConfig = {clean = true, undo = false, propList = entList}
+instance.data.props = propConfig
+
+local vunwrap1
+local aunwrap1
+instance:AddHook("initialize", function()
+	vunwrap1 = vec_meta.QuickUnwrap1
+	aunwrap1 = ang_meta.QuickUnwrap1
+end)
+
+instance:AddHook("deinitialize", function()
+	entList:deinitialize(instance, propConfig.clean)
+end)
 
 --- Creates a prop
 -- @server
@@ -56,8 +64,8 @@ function props_library.create(pos, ang, model, frozen)
 	checkluatype(model, TYPE_STRING)
 	if frozen~=nil then checkluatype(frozen, TYPE_BOOL) else frozen = false end
 
-	local pos = SF.clampPos(vunwrap(pos))
-	local ang = aunwrap(ang)
+	pos = SF.clampPos(vunwrap1(pos))
+	ang = aunwrap1(ang)
 
 	local ply = instance.player
 	model = SF.CheckModel(model, ply, true)
@@ -155,8 +163,8 @@ end
 -- @param boolean? frozen True to spawn the entity in a frozen state. Default = False
 -- @return Entity The prop object
 function props_library.createCustom(pos, ang, vertices, frozen)
-	local pos = SF.clampPos(vunwrap(pos))
-	local ang = aunwrap(ang)
+	pos = SF.clampPos(vunwrap1(pos))
+	ang = aunwrap1(ang)
 	checkluatype(vertices, TYPE_TABLE)
 	if frozen~=nil then checkluatype(frozen, TYPE_BOOL) else frozen = false end
 
@@ -265,8 +273,8 @@ function props_library.createComponent(pos, ang, class, model, frozen)
 
 	if not allowed_components[class] then return SF.Throw("Invalid class!", 1) end
 
-	local pos = SF.clampPos(vunwrap(pos))
-	local ang = aunwrap(ang)
+	local pos = SF.clampPos(vunwrap1(pos))
+	local ang = aunwrap1(ang)
 
 	local ply = instance.player
 	model = SF.CheckModel(model, ply, true)
@@ -356,8 +364,8 @@ function props_library.createSeat(pos, ang, model, frozen)
 	checkluatype(model, TYPE_STRING)
 	if frozen~=nil then checkluatype(frozen, TYPE_BOOL) else frozen = false end
 
-	local pos = SF.clampPos(vunwrap(pos))
-	local ang = aunwrap(ang)
+	local pos = SF.clampPos(vunwrap1(pos))
+	local ang = aunwrap1(ang)
 
 	local ply = instance.player
 	model = SF.CheckModel(model, ply, true)
@@ -416,8 +424,8 @@ function props_library.createSent(pos, ang, class, frozen, data)
 	checkluatype(class, TYPE_STRING)
 	if frozen~=nil then checkluatype(frozen, TYPE_BOOL) else frozen = false end
 
-	local pos = SF.clampPos(vunwrap(pos))
-	local ang = aunwrap(ang)
+	pos = SF.clampPos(vunwrap1(pos))
+	ang = aunwrap1(ang)
 
 	local ply = instance.player
 	plyPropBurst:use(ply, 1)
@@ -597,14 +605,7 @@ function props_library.createSent(pos, ang, class, frozen, data)
 		enttbl.Pos = pos
 		enttbl.Angle = ang
 
-		-- Temporarily disable SF runningOps, because SENT like E2 rely on string metatable methods!
-		-- E2 calls string:find with colon sugar syntax, this means E2 code ended up calling into string __index metamethod (see sflib.lua where SF does metatable patching).
-		-- In case of E2, it usually results in obscure errors being thrown (such as "error in error handling", random things being nil, etc).
-		local runningOpsBackup = SF.runningOps
-		SF.runningOps = nil
-
-		-- Better be safe, pcall this to ensure we continue running our code, in case these external functions cause an error...
-		local isOk, errorMsg = pcall(function()
+		local isOk, errorMsg = instance:runExternal(function()
 			if sent2._preFactory then
 				sent2._preFactory(ply, enttbl)
 			end
@@ -630,7 +631,6 @@ function props_library.createSent(pos, ang, class, frozen, data)
 			end
 		end)
 
-		SF.runningOps = runningOpsBackup -- Restore back runningOps to SF control, and everything is fine :)
 		if not isOk then
 			if IsValid(entity) then
 				entity:Remove()

@@ -63,8 +63,7 @@ function ENT:Compile(sfdata)
 
 	if SERVER then
 		self.ErroredPlayers = {}
-		local clr = self:GetColor()
-		self:SetColor(Color(255, 255, 255, clr.a))
+		self:SetColor4Part(255, 255, 255, select(4, self:GetColor4Part()))
 		self:SetNWInt("State", self.States.Normal)
 
 		if self.Inputs then
@@ -118,7 +117,7 @@ function ENT:Error(err)
 
 	if SERVER then
 		self:SetNWInt("State", self.States.Error)
-		self:SetColor(Color(255, 0, 0, 255))
+		self:SetColor4Part(255, 0, 0, 255)
 	end
 
 	hook.Run("StarfallError", self, self.owner, CLIENT and LocalPlayer() or Entity(0), self.sfdata and self.sfdata.mainfile or "", msg, traceback)
@@ -237,7 +236,10 @@ if SERVER then
 			local function disconnect(sync)
 				huds[ply] = nil
 				hook.Remove("EntityRemoved", n)
-				ply:SetViewEntity()
+				if chip.instance and chip.instance.data.viewEntityChanged then
+					chip.instance.data.viewEntityChanged = false
+					ply:SetViewEntity()
+				end
 				if IsValid(lockController) and IsValid(lockController.link) then
 					net.Start("starfall_lock_control")
 						net.WriteEntity(lockController.link)
@@ -262,7 +264,10 @@ if SERVER then
 				disconnect(false)
 			end
 		else
-			if not enabled then ply:SetViewEntity() end
+			if not enabled and chip.instance.data.viewEntityChanged then
+				chip.instance.data.viewEntityChanged = false
+				ply:SetViewEntity()
+			end
 			huds[ply] = enabled or nil
 		end
 		runHudHooks(ply, chip, activator, enabled)
@@ -298,8 +303,9 @@ else
 			if v.ActiveHuds[ply] then
 				SF.EnableHud(ply, v, nil, false)
 
-				if v.instance.permissionOverrides then
-					v.instance.permissionOverrides.enablehud = nil
+				local instance = v.instance
+				if instance and instance.permissionOverrides then
+					instance.permissionOverrides.enablehud = nil
 				end
 			end
 		end

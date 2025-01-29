@@ -14,7 +14,7 @@ function ENT:Initialize()
 	self:AddEFlags( EFL_FORCE_CHECK_TRANSMIT )
 
 	self:SetNWInt("State", self.States.None)
-	self:SetColor(Color(255, 0, 0, self:GetColor().a))
+	self:SetColor4Part(255, 0, 0, select(4, self:GetColor4Part()))
 	self.ErroredPlayers = {}
 	self.ActiveHuds = {}
 end
@@ -60,6 +60,11 @@ function ENT:Use(activator)
 			net.WriteEntity(activator)
 		net.Broadcast()
 	end
+
+	local instance = self.instance
+	if instance then
+		instance:runScriptHook("starfallused", instance.WrapObject(activator), instance.WrapObject(self))
+	end
 end
 
 function ENT:OnRemove()
@@ -79,20 +84,17 @@ end
 function ENT:SendCode(recipient)
 	if not (IsValid(self.owner) or IsWorld(self.owner)) then return end
 	if not self.sfsenddata then return end
-	if self.sfownerdata then -- Send specific data for owner if there are owner-only files
-		local others = {}
-		for _, ply in ipairs(recipient and (istable(recipient) and recipient or { recipient }) or player.GetHumans()) do
-			if ply==self.owner then
-				SF.SendStarfall("starfall_processor_download", self.sfownerdata, self.owner)
-			else
-				others[#others+1] = ply
-			end
+	local others = {}
+	for _, ply in ipairs(recipient and (istable(recipient) and recipient or { recipient }) or player.GetHumans()) do
+		if ply:GetInfoNum("sf_enabled_cl", 0)==0 then continue end
+		if ply==self.owner and self.sfownerdata then
+			SF.SendStarfall("starfall_processor_download", self.sfownerdata, self.owner)
+		else
+			others[#others+1] = ply
 		end
-		if #others > 0 then
-			SF.SendStarfall("starfall_processor_download", self.sfsenddata, others)
-		end
-	else
-		SF.SendStarfall("starfall_processor_download", self.sfsenddata, recipient)
+	end
+	if #others > 0 then
+		SF.SendStarfall("starfall_processor_download", self.sfsenddata, others)
 	end
 end
 

@@ -41,11 +41,13 @@ local col_meta, cwrap, cunwrap = instance.Types.Color, instance.Types.Color.Wrap
 
 local builtins_library = instance.env
 
-local getent
-local getply
+local getent, getply
+local vunwrap1, vunwrap2
+local aunwrap1, aunwrap2
 instance:AddHook("initialize", function()
-	getent = instance.Types.Entity.GetEntity
-	getply = instance.Types.Player.GetPlayer
+	getent, getply = instance.Types.Entity.GetEntity, instance.Types.Player.GetPlayer
+	vunwrap1, vunwrap2 = vec_meta.QuickUnwrap1, vec_meta.QuickUnwrap2
+	aunwrap1, aunwrap2 = ang_meta.QuickUnwrap1, ang_meta.QuickUnwrap2
 end)
 
 --- Built in values. These don't need to be loaded; they are in the default builtins_library.
@@ -305,7 +307,7 @@ end
 -- @param number quota The threshold where the soft error will be thrown. Ratio of current cpu to the max cpu usage. 0.5 is 50%
 function builtins_library.setSoftQuota(quota)
 	checkluatype(quota, TYPE_NUMBER)
-	instance.cpu_softquota = quota
+	instance.cpu_softquota = math.Clamp(quota, 0, 1)
 end
 
 --- Checks if the chip is capable of performing an action.
@@ -322,7 +324,7 @@ end
 if CLIENT then
 
 	--- Called when local client changed instance permissions
-	-- @name permissionrequest
+	-- @name PermissionRequest
 	-- @class hook
 	-- @client
 
@@ -533,7 +535,7 @@ if SERVER then
 	function builtins_library.print(...)
 		local data, strlen, size = argsToChat(...)
 		if instance.player == SF.Superuser then
-			MsgC("[SF] ", unpack(data))
+			MsgC("[SF] ", unpack(data), "\n")
 			return
 		end
 		printBurst:use(instance.player, size)
@@ -1146,10 +1148,10 @@ end
 function builtins_library.worldToLocal(pos, ang, newSystemOrigin, newSystemAngles)
 
 	local localPos, localAngles = WorldToLocal(
-		vunwrap(pos),
-		aunwrap(ang),
-		vunwrap(newSystemOrigin),
-		aunwrap(newSystemAngles)
+		vunwrap1(pos),
+		aunwrap1(ang),
+		vunwrap2(newSystemOrigin),
+		aunwrap2(newSystemAngles)
 	)
 
 	return vwrap(localPos), awrap(localAngles)
@@ -1165,10 +1167,10 @@ end
 function builtins_library.localToWorld(localPos, localAng, originPos, originAngle)
 
 	local worldPos, worldAngles = LocalToWorld(
-		vunwrap(localPos),
-		aunwrap(localAng),
-		vunwrap(originPos),
-		aunwrap(originAngle)
+		vunwrap1(localPos),
+		aunwrap1(localAng),
+		vunwrap2(originPos),
+		aunwrap2(originAngle)
 	)
 
 	return vwrap(worldPos), awrap(worldAngles)
@@ -1263,6 +1265,11 @@ end
 -- @name model
 -- @class directive
 -- @param model String of the model
+
+--- Precaches models that may take a while to load (max 16). --@precachemodel models/props_junk/watermelon01.mdl
+-- @name precachemodel
+-- @class directive
+-- @param model String of the model to precache
 
 --- Set the current file to only run on the server. Shared is default. --@server
 -- @name server

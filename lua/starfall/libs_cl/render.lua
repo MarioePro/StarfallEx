@@ -10,12 +10,12 @@ local dgetmeta = debug.getmetatable
 local checkluatype = SF.CheckLuaType
 local haspermission = SF.Permissions.hasAccess
 local registerprivilege = SF.Permissions.registerPrivilege
-local col_meta = getmetatable(Color(255, 255, 255, 255))
-local col_SetUnpacked = col_meta.SetUnpacked
-local col_Unpack = col_meta.Unpack
-local vec_meta = getmetatable(Vector(0, 0, 0))
-local vec_SetUnpacked = vec_meta.SetUnpacked
-local vec_Unpack = vec_meta.Unpack
+local COL_META,ENT_META,VEC_META = FindMetaTable("Color"),FindMetaTable("Entity"),FindMetaTable("Vector")
+local Col_SetUnpacked = COL_META.SetUnpacked
+local Col_Unpack = COL_META.Unpack
+local Vec_SetUnpacked = VEC_META.SetUnpacked
+local Vec_Unpack = VEC_META.Unpack
+local Ent_GetTable = ENT_META.GetTable
 
 registerprivilege("render.screen", "Render Screen", "Allows the user to render to a starfall screen", { client = {} })
 registerprivilege("render.hud", "Render Hud", "Allows the user to render to your hud", { client = {} })
@@ -101,7 +101,7 @@ local function buildCircleMesh(vertexCount)
 
 		vtxX, vtxY = rotX * vtxX - rotY * vtxY, rotY * vtxX + rotX * vtxY
 		vtxU, vtxV = (vtxX + 1) * 0.5, (vtxY + 1) * 0.5
-		vec_SetUnpacked(pos, vtxX, vtxY, 0)
+		Vec_SetUnpacked(pos, vtxX, vtxY, 0)
 
 		mesh.Position(pos)
 		mesh.TexCoord(0, vtxU, vtxV)
@@ -180,6 +180,11 @@ local function cleanupRender(instance)
 	instance:cleanupRender()
 end
 
+local function cleanupRenderAllowTrueReturn(instance, args)
+	instance:cleanupRender()
+	if args[1] and args[2]==true then return true end
+end
+
 local function canRenderHud(instance)
 	return SF.IsHUDActive(instance.entity) and (haspermission(instance, nil, "render.hud") or instance.player == SF.Superuser)
 end
@@ -193,7 +198,7 @@ local function hudPrepareSafeArgs(instance, ...)
 end
 
 --- Called when a frame is requested to be drawn. Doesn't require a screen or HUD but only works on rendertargets. (2D Context)
--- @name renderoffscreen
+-- @name RenderOffscreen
 -- @class hook
 -- @client
 SF.hookAdd("PreRender", "renderoffscreen", function(instance)
@@ -205,7 +210,7 @@ SF.hookAdd("PreRender", "renderoffscreen", function(instance)
 end, cleanupRender)
 
 --- Called when a scene is requested to be drawn. This is used for the render.renderview function.
--- @name renderscene
+-- @name RenderScene
 -- @class hook
 -- @client
 -- @param Vector origin View origin
@@ -225,7 +230,7 @@ function(instance)
 end)
 
 --- Called before entities are drawn. You can't render anything, but you can edit hologram matrices before they are drawn.
--- @name hologrammatrix
+-- @name HologramMatrix
 -- @class hook
 -- @client
 SF.hookAdd("PreDrawOpaqueRenderables", "hologrammatrix", function(instance, drawdepth, drawskybox)
@@ -233,13 +238,13 @@ SF.hookAdd("PreDrawOpaqueRenderables", "hologrammatrix", function(instance, draw
 end)
 
 --- Called when a frame is requested to be drawn on hud. (2D Context)
--- @name drawhud
+-- @name DrawHUD
 -- @class hook
 -- @client
 SF.hookAdd("HUDPaint", "drawhud", hudPrepareSafeArgs, cleanupRender)
 
 --- Called when a hud element is attempting to be drawn
--- @name hudshoulddraw
+-- @name HUDShouldDraw
 -- @class hook
 -- @client
 -- @param string str The name of the hud element trying to be drawn
@@ -254,16 +259,17 @@ end, function(instance, args)
 end)
 
 --- Called before opaque entities are drawn. (Only works with HUD) (3D context)
--- @name predrawopaquerenderables
+-- @name PreDrawOpaqueRenderables
 -- @class hook
 -- @client
 -- @param boolean depth Whether the current draw is writing depth
 -- @param boolean skybox Whether the current draw is drawing the skybox
 -- @param boolean skybox3d Whether the current draw is drawing the 3D skybox
-SF.hookAdd("PreDrawOpaqueRenderables", nil, hudPrepareSafeArgs, cleanupRender)
+-- @return boolean Return true to prevent opaque entities from drawing
+SF.hookAdd("PreDrawOpaqueRenderables", nil, hudPrepareSafeArgs, cleanupRenderAllowTrueReturn)
 
 --- Called after opaque entities are drawn. (Only works with HUD) (3D context)
--- @name postdrawopaquerenderables
+-- @name PostDrawOpaqueRenderables
 -- @class hook
 -- @client
 -- @param boolean depth Whether the current draw is writing depth
@@ -272,16 +278,17 @@ SF.hookAdd("PreDrawOpaqueRenderables", nil, hudPrepareSafeArgs, cleanupRender)
 SF.hookAdd("PostDrawOpaqueRenderables", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called before translucent entities are drawn. (Only works with HUD) (3D context)
--- @name predrawtranslucentrenderables
+-- @name PreDrawTranslucentRenderables
 -- @class hook
 -- @client
 -- @param boolean depth Whether the current draw is writing depth
 -- @param boolean skybox Whether the current draw is drawing the skybox
 -- @param boolean skybox3d Whether the current draw is drawing the 3D skybox
-SF.hookAdd("PreDrawTranslucentRenderables", nil, hudPrepareSafeArgs, cleanupRender)
+-- @return boolean Return true to prevent translucent entities from drawing
+SF.hookAdd("PreDrawTranslucentRenderables", nil, hudPrepareSafeArgs, cleanupRenderAllowTrueReturn)
 
 --- Called after translucent entities are drawn. (Only works with HUD) (3D context)
--- @name postdrawtranslucentrenderables
+-- @name PostDrawTranslucentRenderables
 -- @class hook
 -- @client
 -- @param boolean depth Whether the current draw is writing depth
@@ -290,13 +297,13 @@ SF.hookAdd("PreDrawTranslucentRenderables", nil, hudPrepareSafeArgs, cleanupRend
 SF.hookAdd("PostDrawTranslucentRenderables", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called before drawing HUD (2D Context)
--- @name predrawhud
+-- @name PreDrawHUD
 -- @class hook
 -- @client
 SF.hookAdd("PreDrawHUD", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called after drawing HUD (2D Context)
--- @name postdrawhud
+-- @name PostDrawHUD
 -- @class hook
 -- @client
 SF.hookAdd("PostDrawHUD", nil, function(instance)
@@ -306,14 +313,28 @@ SF.hookAdd("PostDrawHUD", nil, function(instance)
 	end
 end, cleanupRender)
 
+--- Called before drawing the player. (Only works with HUD) (3D Context)
+-- @name PreDrawPlayer
+-- @class hook
+-- @client
+-- @param Player ply Player that's about to be drawn
+-- @param number flags STUDIO flags for the render operation
+-- @return boolean Return true to prevent the player from drawing
+SF.hookAdd("PrePlayerDraw", "predrawplayer", function(instance, ply, flags)
+	if canRenderHud(instance) then
+		return true, { instance.Types.Player.Wrap(ply), flags }
+	end
+	return false
+end, cleanupRenderAllowTrueReturn)
+
 --- Called before drawing the viewmodel rendergroup (3D Context)
--- @name predrawviewmodels
+-- @name PreDrawViewModels
 -- @class hook
 -- @client
 SF.hookAdd("PreDrawViewModels", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called when world fog is drawn.
--- @name setupworldfog
+-- @name SetupWorldFog
 -- @class hook
 -- @client
 SF.hookAdd("SetupWorldFog", nil, function(instance)
@@ -329,7 +350,7 @@ end, function(instance)
 end)
 
 --- Called when skybox fog is drawn.
--- @name setupskyboxfog
+-- @name SetupSkyboxFog
 -- @class hook
 -- @client
 -- @param number scale Skybox scale
@@ -346,29 +367,26 @@ end, function(instance)
 end)
 
 --- Called before the 3D skybox is drawn. This will not be called for maps with no 3D skybox, or when the 3d skybox is disabled
--- @name predrawskybox
+-- @name PreDrawSkyBox
 -- @class hook
 -- @client
 -- @return boolean Return true to not predraw the skybox both 2d and 3d
-SF.hookAdd("PreDrawSkyBox", nil, hudPrepareSafeArgs, function(instance, args)
-	instance:cleanupRender()
-    if args[1] and args[2]==true then return true end
-end)
+SF.hookAdd("PreDrawSkyBox", nil, hudPrepareSafeArgs, cleanupRenderAllowTrueReturn)
 
 --- Called right after the 2D skybox has been drawn - allowing you to draw over it.
--- @name postdraw2dskybox
+-- @name PostDraw2DSkyBox
 -- @class hook
 -- @client
 SF.hookAdd("PostDraw2DSkyBox", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called after the 3D skybox is drawn. This will not be called if PreDrawSkyBox has prevented rendering of the skybox
--- @name postdrawskybox
+-- @name PostDrawSkyBox
 -- @class hook
 -- @client
 SF.hookAdd("PostDrawSkyBox", nil, hudPrepareSafeArgs, cleanupRender)
 
 --- Called when the engine wants to calculate the player's view. Only works if connected to Starfall HUD
--- @name calcview
+-- @name CalcView
 -- @class hook
 -- @client
 -- @param Vector pos Current position of the camera
@@ -449,8 +467,14 @@ local mtlunwrap = instance.Types.LockedMaterial.Unwrap
 
 
 local getent
+local vunwrap1, vunwrap2, vunwrap3, vunwrap4
+local aunwrap1
+local cunwrap1
 instance:AddHook("initialize", function()
 	getent = instance.Types.Entity.GetEntity
+	vunwrap1, vunwrap2, vunwrap3, vunwrap4 = vec_meta.QuickUnwrap1, vec_meta.QuickUnwrap2, vec_meta.QuickUnwrap3, vec_meta.QuickUnwrap4
+	aunwrap1 = ang_meta.QuickUnwrap1
+	cunwrap1 = col_meta.QuickUnwrap1
 end)
 
 instance:AddHook("deinitialize", function ()
@@ -467,7 +491,7 @@ end)
 
 
 function instance:prepareRender()
-	col_SetUnpacked(currentcolor, 255, 255, 255, 255)
+	Col_SetUnpacked(currentcolor, 255, 255, 255, 255)
 	render.SetColorMaterial()
 	draw.NoTexture()
 	surface.SetDrawColor(255, 255, 255, 255)
@@ -776,8 +800,8 @@ function render_library.pushViewMatrix(tbl)
 	checkluatype(tbl, TYPE_TABLE)
 
 	local newtbl = {}
-	if tbl.origin ~= nil then newtbl.origin = vunwrap(tbl.origin) end
-	if tbl.angles ~= nil then newtbl.angles = aunwrap(tbl.angles) end
+	if tbl.origin ~= nil then newtbl.origin = vunwrap1(tbl.origin) end
+	if tbl.angles ~= nil then newtbl.angles = aunwrap1(tbl.angles) end
 
 	for k, v in pairs(tbl) do
 		local check = viewmatrix_checktypes[k]
@@ -846,8 +870,9 @@ function render_library.setBackgroundColor(col, screen)
 		SF.Throw("Invalid rendering entity.", 2)
 	end
 
-	if screen.SetBackgroundColor then --Fail silently on HUD etc
-		screen:SetBackgroundColor(col.r, col.g, col.b, col.a)
+	local SetBackgroundColor = Ent_GetTable(screen).SetBackgroundColor
+	if SetBackgroundColor then --Fail silently on HUD etc
+		SetBackgroundColor(screen, col.r, col.g, col.b, col.a)
 	end
 end
 
@@ -896,7 +921,7 @@ function render_library.setRGBA(r, g, b, a)
 	if g==nil then g=255 end
 	if b==nil then b=255 end
 	if a==nil then a=255 end
-	col_SetUnpacked(currentcolor, r, g, b, a)
+	Col_SetUnpacked(currentcolor, r, g, b, a)
 	surface_SetDrawColor(r, g, b, a)
 	surface_SetTextColor(r, g, b, a)
 end
@@ -1343,10 +1368,10 @@ local render_DrawQuadEasy = render.DrawQuadEasy
 
 local function makeQuad(x, y, w, h)
 	local right, bot = x + w, y + h
-	vec_SetUnpacked(quad_v1, x, y, 0)
-	vec_SetUnpacked(quad_v2, right, y, 0)
-	vec_SetUnpacked(quad_v3, right, bot, 0)
-	vec_SetUnpacked(quad_v4, x, bot, 0)
+	Vec_SetUnpacked(quad_v1, x, y, 0)
+	Vec_SetUnpacked(quad_v2, right, y, 0)
+	Vec_SetUnpacked(quad_v3, right, bot, 0)
+	Vec_SetUnpacked(quad_v4, x, bot, 0)
 end
 
 --- Draws a rectangle using the current color
@@ -1394,7 +1419,7 @@ end
 function render_library.drawRectRotated(x, y, w, h, rot)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
 	render_SetColorMaterial()
-	vec_SetUnpacked(quad_pos, x, y, 0)
+	Vec_SetUnpacked(quad_pos, x, y, 0)
 	render_DrawQuadEasy(quad_pos, quad_normal, w, h, currentcolor, -90 - rot)
 end
 
@@ -1416,7 +1441,7 @@ end
 -- @param number radius Radius
 function render_library.drawCircle(x, y, radius)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	local r, g, b, a = col_Unpack(currentcolor)
+	local r, g, b, a = Col_Unpack(currentcolor)
 	surface.DrawCircle(x, y, radius, r, g, b, a)
 end
 
@@ -1427,8 +1452,8 @@ end
 function render_library.drawFilledCircle(x, y, radius)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
 
-	local r, g, b, a = col_Unpack(currentcolor)
-	vec_SetUnpacked(circleMeshVector, r / 255, g / 255, b / 255)
+	local r, g, b, a = Col_Unpack(currentcolor)
+	Vec_SetUnpacked(circleMeshVector, r / 255, g / 255, b / 255)
 
 	circleMeshMaterial:SetVector("$color", circleMeshVector)
 	circleMeshMaterial:SetFloat("$alpha", a / 255)
@@ -1439,10 +1464,10 @@ function render_library.drawFilledCircle(x, y, radius)
 	if x ~= 0 or y ~= 0 or radius ~= 1 then
 		circleMeshMatrix:Identity()
 
-		vec_SetUnpacked(circleMeshVector, x, y, 0)
+		Vec_SetUnpacked(circleMeshVector, x, y, 0)
 		circleMeshMatrix:SetTranslation(circleMeshVector)
 
-		vec_SetUnpacked(circleMeshVector, radius, radius, radius)
+		Vec_SetUnpacked(circleMeshVector, radius, radius, radius)
 		circleMeshMatrix:SetScale(circleMeshVector)
 
 		cam.PushModelMatrix(circleMeshMatrix, true)
@@ -1461,10 +1486,10 @@ do
 	local v1_vec, v2_vec, v3_vec = Vector(0, 0, 0), Vector(0, 0, 0), Vector(0, 0, 0)
 
 	drawTriangle = function(x1, y1, x2, y2, x3, y3)
-		vec_SetUnpacked(v1_vec, x1, y1, 0)
-		vec_SetUnpacked(v2_vec, x2, y2, 0)
-		vec_SetUnpacked(v3_vec, x3, y3, 0)
-		local r, g, b, a = col_Unpack(currentcolor)
+		Vec_SetUnpacked(v1_vec, x1, y1, 0)
+		Vec_SetUnpacked(v2_vec, x2, y2, 0)
+		Vec_SetUnpacked(v3_vec, x3, y3, 0)
+		local r, g, b, a = Col_Unpack(currentcolor)
 		mesh_Position( v1_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
 		mesh_Position( v2_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
 		mesh_Position( v3_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
@@ -1543,7 +1568,7 @@ do
 		mesh.Position, mesh.Color, mesh.TexCoord, mesh.AdvanceVertex
 	
 	drawTexturedRectUV = function(startU, startV, endU, endV)
-		local r, g, b, a = col_Unpack(currentcolor)
+		local r, g, b, a = Col_Unpack(currentcolor)
 		mesh_Position( quad_v1 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, startU, startV ); mesh_AdvanceVertex();
 		mesh_Position( quad_v2 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, endU, startV ); mesh_AdvanceVertex();
 		mesh_Position( quad_v3 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, endU, endV ); mesh_AdvanceVertex();
@@ -1601,7 +1626,7 @@ end
 -- @param number rot Rotation in degrees
 function render_library.drawTexturedRectRotated(x, y, w, h, rot)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	vec_SetUnpacked(quad_pos, x, y, 0)
+	Vec_SetUnpacked(quad_pos, x, y, 0)
 	render_DrawQuadEasy(quad_pos, quad_normal, w, h, currentcolor, -90 - rot)
 end
 
@@ -1613,10 +1638,10 @@ do
 	local v1_vec, v2_vec, v3_vec = Vector(0, 0, 0), Vector(0, 0, 0), Vector(0, 0, 0)
 
 	drawTexturedTriangleUV = function(vert1, vert2, vert3)
-		vec_SetUnpacked(v1_vec, vert1.x, vert1.y, 0)
-		vec_SetUnpacked(v2_vec, vert2.x, vert2.y, 0)
-		vec_SetUnpacked(v3_vec, vert3.x, vert3.y, 0)
-		local r, g, b, a = col_Unpack(currentcolor)
+		Vec_SetUnpacked(v1_vec, vert1.x, vert1.y, 0)
+		Vec_SetUnpacked(v2_vec, vert2.x, vert2.y, 0)
+		Vec_SetUnpacked(v3_vec, vert3.x, vert3.y, 0)
+		local r, g, b, a = Col_Unpack(currentcolor)
 		mesh_Position( v1_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert1.u or 0, vert1.v or 0 ); mesh_AdvanceVertex();
 		mesh_Position( v2_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert2.u or 0, vert2.v or 0 ); mesh_AdvanceVertex();
 		mesh_Position( v3_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert3.u or 0, vert3.v or 0 ); mesh_AdvanceVertex();
@@ -1983,8 +2008,7 @@ end
 -- @param number height Height of the sprite.
 -- @param Color? Color tint to give the sprite. Default: white
 function render_library.draw3DSprite(pos, width, height, color)
-	pos = vunwrap(pos)
-	render.DrawSprite(pos, width, height, color)
+	render.DrawSprite(vunwrap1(pos), width, height, color)
 end
 
 --- Draws a sphere
@@ -1994,10 +2018,9 @@ end
 -- @param number latitudeSteps The amount of latitude steps. The larger this number is, the smoother the sphere is
 function render_library.draw3DSphere(pos, radius, longitudeSteps, latitudeSteps)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	pos = vunwrap(pos)
 	longitudeSteps = clamp(longitudeSteps, 3, 50)
 	latitudeSteps = clamp(latitudeSteps, 3, 50)
-	render.DrawSphere(pos, radius, longitudeSteps, latitudeSteps, currentcolor, true)
+	render.DrawSphere(vunwrap1(pos), radius, longitudeSteps, latitudeSteps, currentcolor, true)
 end
 
 --- Draws a wireframe sphere
@@ -2009,10 +2032,9 @@ end
 function render_library.draw3DWireframeSphere(pos, radius, longitudeSteps, latitudeSteps, writeZ)
 	if writeZ == nil then writeZ = true end
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	pos = vunwrap(pos)
 	longitudeSteps = clamp(longitudeSteps, 3, 50)
 	latitudeSteps = clamp(latitudeSteps, 3, 50)
-	render.DrawWireframeSphere(pos, radius, longitudeSteps, latitudeSteps, currentcolor, writeZ)
+	render.DrawWireframeSphere(vunwrap1(pos), radius, longitudeSteps, latitudeSteps, currentcolor, writeZ)
 end
 
 --- Draws a 3D Line
@@ -2022,10 +2044,7 @@ end
 function render_library.draw3DLine(startPos, endPos, writeZ)
 	if writeZ == nil then writeZ = true end
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	startPos = vunwrap(startPos)
-	endPos = vunwrap(endPos)
-
-	render.DrawLine(startPos, endPos, currentcolor, writeZ)
+	render.DrawLine(vunwrap1(startPos), vunwrap2(endPos), currentcolor, writeZ)
 end
 
 --- Draws a box in 3D space
@@ -2035,12 +2054,7 @@ end
 -- @param Vector maxs End position of the box, relative to origin.
 function render_library.draw3DBox(origin, angle, mins, maxs)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	origin = vunwrap(origin)
-	mins = vunwrap(mins)
-	maxs = vunwrap(maxs)
-	angle = aunwrap(angle)
-
-	render.DrawBox(origin, angle, mins, maxs, currentcolor, true)
+	render.DrawBox(vunwrap1(origin), aunwrap1(angle), vunwrap2(mins), vunwrap3(maxs), currentcolor, true)
 end
 
 --- Draws a wireframe box in 3D space
@@ -2052,12 +2066,7 @@ end
 function render_library.draw3DWireframeBox(origin, angle, mins, maxs, writeZ)
 	if writeZ == nil then writeZ = true end
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	origin = vunwrap(origin)
-	mins = vunwrap(mins)
-	maxs = vunwrap(maxs)
-	angle = aunwrap(angle)
-
-	render.DrawWireframeBox(origin, angle, mins, maxs, currentcolor, writeZ)
+	render.DrawWireframeBox(vunwrap1(origin), aunwrap1(angle), vunwrap2(mins), vunwrap3(maxs), currentcolor, writeZ)
 end
 
 --- Draws textured beam.
@@ -2068,10 +2077,7 @@ end
 -- @param number textureEnd The end coordinate of the texture used.
 function render_library.draw3DBeam(startPos, endPos, width, textureStart, textureEnd)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-	startPos = vunwrap(startPos)
-	endPos = vunwrap(endPos)
-
-	render.DrawBeam(startPos, endPos, width, textureStart, textureEnd, currentcolor)
+	render.DrawBeam(vunwrap1(startPos), vunwrap2(endPos), width, textureStart, textureEnd, currentcolor)
 end
 
 --- Begin drawing a multi-segment beam.
@@ -2088,10 +2094,7 @@ end
 -- @param Color color The color to be used.
 function render_library.add3DBeam(startPos, width, textureEnd, color)
     if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-    startPos = vunwrap(startPos)
-    color = cunwrap(color)
-
-    render.AddBeam(startPos, width, textureEnd, color)
+    render.AddBeam(vunwrap1(startPos), width, textureEnd, cunwrap1(color))
 end
 
 --- Ends the beam mesh of a beam started with render.start3DBeam.
@@ -2107,13 +2110,7 @@ end
 -- @param Vector vert4 The fourth vertex.
 function render_library.draw3DQuad(vert1, vert2, vert3, vert4)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
-
-	vert1 = vunwrap(vert1)
-	vert2 = vunwrap(vert2)
-	vert3 = vunwrap(vert3)
-	vert4 = vunwrap(vert4)
-
-	render_DrawQuad(vert1, vert2, vert3, vert4, currentcolor)
+	render_DrawQuad(vunwrap1(vert1), vunwrap2(vert2), vunwrap3(vert3), vunwrap4(vert4), currentcolor)
 end
 
 local pos_vec, norm_vec = Vector(0, 0, 0), Vector(0, 0, 0)
@@ -2126,8 +2123,8 @@ local pos_vec, norm_vec = Vector(0, 0, 0), Vector(0, 0, 0)
 function render_library.draw3DQuadEasy(pos, norm, width, height, rot)
 	if not renderdata.isRendering then SF.Throw("Not in rendering hook.", 2) end
 
-	vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
-	vec_SetUnpacked(norm_vec, norm[1], norm[2], norm[3])
+	Vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
+	Vec_SetUnpacked(norm_vec, norm[1], norm[2], norm[3])
 
 	render_DrawQuadEasy(pos_vec, norm_vec, width, height, currentcolor, rot)
 end
@@ -2138,11 +2135,11 @@ do
 		mesh.Position, mesh.Color, mesh.TexCoord, mesh.AdvanceVertex
 	
 	draw3DQuadUV = function(vert1, vert2, vert3, vert4)
-		local r, g, b, a = col_Unpack(currentcolor)
-		vec_SetUnpacked(quad_v1, vert1[1], vert1[2], vert1[3])
-		vec_SetUnpacked(quad_v2, vert2[1], vert2[2], vert2[3])
-		vec_SetUnpacked(quad_v3, vert3[1], vert3[2], vert3[3])
-		vec_SetUnpacked(quad_v4, vert4[1], vert4[2], vert4[3])
+		local r, g, b, a = Col_Unpack(currentcolor)
+		Vec_SetUnpacked(quad_v1, vert1[1], vert1[2], vert1[3])
+		Vec_SetUnpacked(quad_v2, vert2[1], vert2[2], vert2[3])
+		Vec_SetUnpacked(quad_v3, vert3[1], vert3[2], vert3[3])
+		Vec_SetUnpacked(quad_v4, vert4[1], vert4[2], vert4[3])
 		mesh_Position( quad_v1 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert1[4], vert1[5] ); mesh_AdvanceVertex();
 		mesh_Position( quad_v2 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert2[4], vert2[5] ); mesh_AdvanceVertex();
 		mesh_Position( quad_v3 ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert3[4], vert3[5] ); mesh_AdvanceVertex();
@@ -2171,10 +2168,10 @@ do
 	local v1_vec, v2_vec, v3_vec = Vector(0, 0, 0), Vector(0, 0, 0), Vector(0, 0, 0)
 
 	draw3DTriangle = function(vert1, vert2, vert3)
-		vec_SetUnpacked(v1_vec, vert1[1], vert1[2], vert1[3])
-		vec_SetUnpacked(v2_vec, vert2[1], vert2[2], vert2[3])
-		vec_SetUnpacked(v3_vec, vert3[1], vert3[2], vert3[3])
-		local r, g, b, a = col_Unpack(currentcolor)
+		Vec_SetUnpacked(v1_vec, vert1[1], vert1[2], vert1[3])
+		Vec_SetUnpacked(v2_vec, vert2[1], vert2[2], vert2[3])
+		Vec_SetUnpacked(v3_vec, vert3[1], vert3[2], vert3[3])
+		local r, g, b, a = Col_Unpack(currentcolor)
 		mesh_Position( v1_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
 		mesh_Position( v2_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
 		mesh_Position( v3_vec ); mesh_Color( r, g, b, a ); mesh_AdvanceVertex();
@@ -2204,10 +2201,10 @@ do
 	local v1_vec, v2_vec, v3_vec = Vector(0, 0, 0), Vector(0, 0, 0), Vector(0, 0, 0)
 
 	draw3DTriangleUV = function(vert1, vert2, vert3)
-		vec_SetUnpacked(v1_vec, vert1.x, vert1.y, vert1.z)
-		vec_SetUnpacked(v2_vec, vert2.x, vert2.y, vert2.z)
-		vec_SetUnpacked(v3_vec, vert3.x, vert3.y, vert3.z)
-		local r, g, b, a = col_Unpack(currentcolor)
+		Vec_SetUnpacked(v1_vec, vert1.x, vert1.y, vert1.z)
+		Vec_SetUnpacked(v2_vec, vert2.x, vert2.y, vert2.z)
+		Vec_SetUnpacked(v3_vec, vert3.x, vert3.y, vert3.z)
+		local r, g, b, a = Col_Unpack(currentcolor)
 		mesh_Position( v1_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert1.u or 0, vert1.v or 0 ); mesh_AdvanceVertex();
 		mesh_Position( v2_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert2.u or 0, vert2.v or 0 ); mesh_AdvanceVertex();
 		mesh_Position( v3_vec ); mesh_Color( r, g, b, a ); mesh_TexCoord( 0, vert3.u or 0, vert3.v or 0 ); mesh_AdvanceVertex();
@@ -2244,7 +2241,7 @@ function render_library.cursorPos(ply, screen)
 
 	if screen~=nil then screen = getent(screen) else screen = renderdata.renderEnt end
 	if not screen then SF.Throw("Invalid screen", 2) end
-	local screenTransform = screen.Transform
+	local screenTransform = Ent_GetTable(screen).Transform
 	if not screenTransform then SF.Throw("Invalid screen", 2) end
 
 	local transform, transforminv = screenTransform:get()
@@ -2295,7 +2292,7 @@ function render_library.getViewSetup(curview)
 end
 
 --- Returns the entity currently being rendered to
--- @return Entity Entity of the screen or hud being rendered
+-- @return Entity Entity of the screen being rendered
 function render_library.getScreenEntity()
 	return ewrap(renderdata.renderEnt)
 end
@@ -2357,8 +2354,10 @@ end
 -- @return number the X size of the current render context
 -- @return number the Y size of the current render context
 function render_library.getResolution()
-	if renderdata.renderEnt and renderdata.renderEnt.GetResolution then
-		return renderdata.renderEnt:GetResolution()
+	local screen = renderdata.renderEnt
+	if screen then
+		local GetResolution = Ent_GetTable(screen).GetResolution
+		if GetResolution then return GetResolution(screen) end
 	end
 	return ScrW(), ScrH()
 end
@@ -2378,9 +2377,9 @@ local startpos_vec, endpos_vec = Vector(0, 0, 0), Vector(0, 0, 0)
 -- @param Vector endpos The ending vector
 -- @return Color The color
 function render_library.traceSurfaceColor(startpos, endpos)
-	vec_SetUnpacked(startpos_vec, startpos[1], startpos[2], startpos[3])
-	vec_SetUnpacked(endpos_vec, endpos[1], endpos[2], endpos[3])
-	local r, g, b = vec_Unpack(render.GetSurfaceColor(startpos_vec, endpos_vec))
+	Vec_SetUnpacked(startpos_vec, startpos[1], startpos[2], startpos[3])
+	Vec_SetUnpacked(endpos_vec, endpos[1], endpos[2], endpos[3])
+	local r, g, b = Vec_Unpack(render.GetSurfaceColor(startpos_vec, endpos_vec))
 	return setmetatable({r * 255, g * 255, b * 255, 255}, col_meta)
 end
 
@@ -2396,8 +2395,8 @@ function render_library.renderView(tbl)
 	checkluatype(tbl, TYPE_TABLE)
 
 	local origin, angles, w, h, ortho, offcenter
-	if tbl.origin~=nil then origin = vunwrap(tbl.origin) end
-	if tbl.angles~=nil then angles = aunwrap(tbl.angles) end
+	if tbl.origin~=nil then origin = vunwrap1(tbl.origin) end
+	if tbl.angles~=nil then angles = aunwrap1(tbl.angles) end
 	if tbl.aspectratio~=nil then checkluatype(tbl.aspectratio, TYPE_NUMBER) end
 	if tbl.x~=nil then checkluatype(tbl.x, TYPE_NUMBER) end
 	if tbl.y~=nil then checkluatype(tbl.y, TYPE_NUMBER) end
@@ -2455,8 +2454,9 @@ function render_library.renderView(tbl)
 	if renderdata.renderedViews >= cv_max_maxrenderviewsperframe:GetInt() then
 		SF.Throw("Max rendered views per frame exceeded!.", 2)
 	end
-
 	renderdata.renderedViews = renderdata.renderedViews + 1
+
+	instance:pushCpuCheck()
 
 	local prevData = {
 		matrix_stack = matrix_stack,
@@ -2524,6 +2524,9 @@ function render_library.renderView(tbl)
 	renderingView = false
 	renderdata.renderingView = false
 	renderdata.isRendering = true
+
+	instance:popCpuCheck()
+	instance:checkCpu()
 end
 
 --- Returns whether render.renderView is being executed.
@@ -2563,7 +2566,7 @@ function render_library.pushCustomClipPlane(normal, distance)
 		SF.Throw("Pushed too many clipping planes.", 2)
 	end
 
-	vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
+	Vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
 	render.PushCustomClipPlane(norm_vec, distance)
 
 	pushedClippingPlanes = pushedClippingPlanes + 1
@@ -2584,8 +2587,8 @@ end
 -- @param Vector normal Normal vector of the surface
 -- @return Vector Vector representing color of the light
 function render_library.computeLighting(pos, normal)
-	vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
-	vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
+	Vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
+	Vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
 	return vwrap(render.ComputeLighting(pos_vec, norm_vec))
 end
 
@@ -2594,8 +2597,8 @@ end
 -- @param Vector normal Normal vector of the surface
 -- @return Vector Vector representing color of the light
 function render_library.computeDynamicLighting(pos, normal)
-	vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
-	vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
+	Vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
+	Vec_SetUnpacked(norm_vec, normal[1], normal[2], normal[3])
 	return vwrap(render.ComputeDynamicLighting(pos_vec, norm_vec))
 end
 
@@ -2603,7 +2606,7 @@ end
 -- @param Vector pos Vector position to sample from
 -- @return Vector Vector representing color of the light
 function render_library.getLightColor(pos)
-	vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
+	Vec_SetUnpacked(pos_vec, pos[1], pos[2], pos[3])
 	return vwrap(render.GetLightColor(pos_vec))
 end
 
@@ -2739,7 +2742,7 @@ end
 -- @param number radius
 -- @return number Percentage visible, from 0-1
 function render_library.pixelVisible(position, radius)
-	position = vunwrap(position)
+	position = vunwrap1(position)
 	checkluatype(radius, TYPE_NUMBER)
 	
 	local PixVis = pixhandle_bank:use(instance.player)

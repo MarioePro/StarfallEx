@@ -13,6 +13,61 @@ local checkpattern = SF.CheckPattern
 local registerprivilege = SF.Permissions.registerPrivilege
 local IsValid = FindMetaTable("Entity").IsValid
 
+hook.Add("StarfallProcessDocs", "DarkRP", function(docs)
+	if DarkRP then return end
+	docs.Libraries.darkrp = nil
+
+	local ent_methods = docs.Types.Entity.methods
+	ent_methods.doorIndex = nil
+	ent_methods.isLocked = nil
+	ent_methods.getDoorOwner = nil
+	ent_methods.getKeysTitle = nil
+	ent_methods.isDoor = nil
+	ent_methods.isKeysOwned = nil
+	ent_methods.isKeysOwnedBy = nil
+	ent_methods.isMoneyBag = nil
+	ent_methods.getMoneyAmount = nil
+	ent_methods.getShipmentCount = nil
+	ent_methods.getShipmentContentsIndex = nil
+	ent_methods.getShipmentContents = nil
+
+	local ply_methods = docs.Types.Player.methods
+	ply_methods.keysUnOwnAll = nil
+	ply_methods.teamBanTimeLeft = nil
+	ply_methods.requestMoney = nil
+	ply_methods.giveMoney = nil
+	ply_methods.isInRoom = nil
+	ply_methods.canAfford = nil
+	ply_methods.canKeysLock = nil
+	ply_methods.canKeysUnlock = nil
+	ply_methods.getDarkRPVar = nil
+	ply_methods.getJobTable = nil
+	ply_methods.getPocketItems = nil
+	ply_methods.getWantedReason = nil
+	ply_methods.hasDarkRPPrivilege = nil
+	ply_methods.isArrested = nil
+	ply_methods.isChief = nil
+	ply_methods.isCook = nil
+	ply_methods.isCP = nil
+	ply_methods.isHitman = nil
+	ply_methods.isMayor = nil
+	ply_methods.isMedic = nil
+	ply_methods.isWanted = nil
+	ply_methods.getMoney = nil
+
+	docs.Hooks.moneyPrinterCatchFire = nil
+	docs.Hooks.moneyPrinterPrinted = nil
+	docs.Hooks.moneyPrinterPrintMoney = nil
+	docs.Hooks.playerWalletChanged = nil
+	docs.Hooks.lockdownEnded = nil
+	docs.Hooks.lockdownStarted = nil
+	docs.Hooks.addLaw = nil
+	docs.Hooks.removeLaw = nil
+	docs.Hooks.resetLaws = nil
+	docs.Hooks.lockpickStarted = nil
+	docs.Hooks.onLockpickCompleted = nil
+end)
+
 -- Under normal circumstances, an API change could introduce security
 -- vulnerabilities. Suppose a DarkRP function changes to also return a Player
 -- or Entity object, whereas before it only returned safe types like numbers
@@ -400,7 +455,7 @@ if SERVER then
 	--- Called when a money printer is about to catch fire. DarkRP only. Called between moneyPrinterPrintMoney and moneyPrinterPrinted.
 	-- Not guaranteed to work for non-vanilla money printers.
 	-- Only works if the owner of the chip also owns the money printer, or if the chip is running in superuser mode.
-	-- @name moneyPrinterCatchFire
+	-- @name MoneyPrinterCatchFire
 	-- @class hook
 	-- @server
 	-- @param Entity moneyprinter The money printer that is about to catch fire
@@ -416,7 +471,7 @@ if SERVER then
 	--- Called after a money printer is has printed money. DarkRP only.
 	-- Not guaranteed to work for non-vanilla money printers.
 	-- Only works if the owner of the chip also owns the money printer, or if the chip is running in superuser mode.
-	-- @name moneyPrinterPrinted
+	-- @name MoneyPrinterPrinted
 	-- @class hook
 	-- @server
 	-- @param Entity moneyprinter The money printer
@@ -434,7 +489,7 @@ if SERVER then
 	-- Not guaranteed to work for non-vanilla money printers.
 	-- You should use moneyPrinterPrinted instead, as the printer is not guaranteed to print money even if this hook is called.
 	-- Only works if the owner of the chip also owns the money printer, or if the chip is running in superuser mode.
-	-- @name moneyPrinterPrintMoney
+	-- @name MoneyPrinterPrintMoney
 	-- @class hook
 	-- @server
 	-- @param Entity moneyprinter The money printer
@@ -451,7 +506,7 @@ if SERVER then
 	
 	--- Called when a player receives money. DarkRP only.
 	-- Will only be called if the recipient is the owner of the chip, or if the chip is running in superuser mode.
-	-- @name playerWalletChanged
+	-- @name PlayerWalletChanged
 	-- @class hook
 	-- @server
 	-- @param Player ply The player who is getting money.
@@ -467,7 +522,7 @@ if SERVER then
 	end)
 	
 	--- Called when a lockdown has ended. DarkRP only.
-	-- @name lockdownEnded
+	-- @name LockdownEnded
 	-- @class hook
 	-- @server
 	-- @param Player? actor The player who ended the lockdown, or nil.
@@ -477,7 +532,7 @@ if SERVER then
 	end)
 
 	--- Called when a lockdown has started. DarkRP only.
-	-- @name lockdownStarted
+	-- @name LockdownStarted
 	-- @class hook
 	-- @server
 	-- @param Player? actor The player who started the lockdown, or nil.
@@ -487,7 +542,7 @@ if SERVER then
 	end)
 
 	--- Called when a law is added. DarkRP only.
-	-- @name addLaw
+	-- @name AddLaw
 	-- @class hook
 	-- @param number index Index of the law
 	-- @param string law Law string
@@ -499,7 +554,7 @@ if SERVER then
 	end)
 
 	--- Called when a law is removed. DarkRP only. Not usually called when /resetlaws is used.
-	-- @name removeLaw
+	-- @name RemoveLaw
 	-- @class hook
 	-- @server
 	-- @param number index Index of the law
@@ -512,7 +567,7 @@ if SERVER then
 	end)
 
 	--- Called when laws are reset. DarkRP only. Usually the only hook called when /resetlaws is used.
-	-- @name resetLaws
+	-- @name ResetLaws
 	-- @class hook
 	-- @server
 	-- @param Player? player The player resetting the laws.
@@ -523,7 +578,7 @@ if SERVER then
 
 	--- Called when a player is about to pick a lock. DarkRP only.
 	-- Will only be called if the lockpicker is the owner of the chip, or if the chip is running in superuser mode.
-	-- @name lockpickStarted
+	-- @name LockpickStarted
 	-- @class hook
 	-- @server
 	-- @param Player ply The player that is about to pick a lock.
@@ -543,7 +598,7 @@ if SERVER then
 
 	--- Called when a player has finished picking a lock, successfully or otherwise. DarkRP only.
 	-- Will only be called if the lockpicker is the owner of the chip, or if the chip is running in superuser mode.
-	-- @name onLockpickCompleted
+	-- @name OnLockpickCompleted
 	-- @class hook
 	-- @server
 	-- @param Player ply The player attempting to lockpick the entity.
@@ -870,7 +925,7 @@ end
 --- Get the amount of money in a "money bag" or cheque, or number of items in a dropped item stack. DarkRP only.
 -- Equivalent to GLua Entity:Getamount.
 -- @return number? Amount of money or number of items
-function ents_methods:getAmount()
+function ents_methods:getMoneyAmount()
 	self = getent(self)
 	return self.Getamount and assertsafety(self:Getamount()) or nil
 end
@@ -878,7 +933,7 @@ end
 --- Get the number of items remaining in a shipment. DarkRP only.
 -- Equivalent to GLua Entity:Getcount.
 -- @return number? Number of items remaining, or nil if not a shipment
-function ents_methods:getCount()
+function ents_methods:getShipmentCount()
 	self = getent(self)
 	return self.Getcount and assertsafety(self:Getcount()) or nil
 end

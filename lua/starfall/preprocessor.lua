@@ -34,6 +34,11 @@ SF.PreprocessData = {
 			self.model = args
 		end,
 
+		precachemodel = function(self, args)
+			if #args == 0 then return "Empty precachemodel directive" end
+			self.precachemodels[#self.precachemodels + 1] = args
+		end,
+
 		name = function(self, args) self.scriptname = string.sub(args, 1, 64) end,
 		author = function(self, args) self.scriptauthor = string.sub(args, 1, 64) end,
 		server = function(self, args) self.serverorclient = "server" end,
@@ -68,7 +73,9 @@ SF.PreprocessData = {
 			
 			for _, incdata in ipairs(self.includesdata) do
 				incdata = processor:ResolvePath(incdata, self.path) or error("Bad --@includedata "..incdata.." in file "..self.path)
-				processor.files[incdata].datafile = true
+				local fdata = processor.files[incdata]
+				fdata.datafile = true
+				fdata.serverorclient = self.serverorclient
 			end
 		end
 	},
@@ -80,6 +87,7 @@ SF.PreprocessData = {
 			includedirs = {},
 			includesdata = {},
 			httpincludes = {},
+			precachemodels = {},
 		}, t)
 	end
 }
